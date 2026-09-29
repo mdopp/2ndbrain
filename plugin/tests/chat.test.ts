@@ -106,6 +106,75 @@ test("Chat: Fragen ohne Bild – 'Sag mal' geht ans Modell, Atlas-Fragen bekomme
             && r3.antwort.includes('g0 -.->|"Query: finde Sendung nach Nummer · review"| x0'), r3.antwort);
 });
 
+test("Chat: 'Bild des Contexts' ohne Namen – der Kontext des offenen Themas oder der offenen Atlas-Seite", async () => {
+  const src = vault();
+  assert.equal(pictureWish("kannst du ein bild des contexts bauen", { themen: ["auftragswesen"], atlas: ["sd-auftragswesen"] }),
+               "bild-kontexte");
+  // offenes Thema "Auftragswesen (Bereich)" -> gleichnamige Subdomaene sd-auftragswesen
+  const r = await ask({ frage: "kannst du ein bild des contexts bauen", ziel: { datei: "entities/projects/auftragswesen.md" } },
+                      opts(src));
+  assert.equal(r.skill, "bild-kontexte", r.antwort);
+  assert.ok(r.antwort?.startsWith("**Auftragswesen** – Domain Atlas: 2 Nachrichten"), r.antwort);
+  assert.deepEqual(r.bezug?.atlas, ["sd-auftragswesen"]);
+  // offene Glossar-Seite mit atlas_id
+  const g = await ask({ frage: "Zeichne den Kontext", ziel: { datei: "entities/glossary/wareneingang.md" } }, opts(src));
+  assert.equal(g.skill, "bild-kontexte", g.antwort);
+  assert.ok(g.antwort?.startsWith("**Wareneingang** – Domain Atlas"), g.antwort);
+  // dieselbe Seite bei einer Frage ohne Kontext: kein Bezug daraus
+  const n = await ask({ frage: "Was ist neu?", ziel: { datei: "entities/glossary/wareneingang.md" } }, opts(src));
+  assert.deepEqual([n.bezug?.atlas, n.bezug?.herkunft], [[], ""]);
+  // Thema ohne Atlas-Gegenstueck: kein Bild, das Modell antwortet
+  const src2 = new MemorySource({ "entities/contexts/_index.md": INDEX,
+                                  "entities/projects/portal.md": "---\ntype: project\ntitle: Portal\n---\n" });
+  const p = await ask({ frage: "kannst du ein bild des contexts bauen", ziel: { datei: "entities/projects/portal.md" } }, opts(src2));
+  assert.equal(p.grund, "Kein Modell", "nie der Themenbaum für eine Frage nach dem Kontext");
+});
+
+test("Chat: Bezug von Hand gewählt – gilt für die Frage, Teile einzeln, Herkunft bleibt 'gewählt'", async () => {
+  const src = vault();
+  // gewaehlt: nur die Subdomaene Lagerhof; die Frage nennt nichts
+  const r = await ask({ frage: "kannst du ein bild des contexts bauen", bezug: { atlas: ["sd-lagerhof"], herkunft: "gewählt" } },
+                      opts(src));
+  assert.equal(r.skill, "bild-kontexte", r.antwort);
+  assert.ok(r.antwort?.startsWith("**Lagerhof** – Domain Atlas"), r.antwort);
+  assert.equal(r.bezug?.herkunft, "gewählt");
+  assert.deepEqual(r.bezug?.teile, [{ art: "atlas", id: "sd-lagerhof", name: "Lagerhof" }]);
+  // Teile aus einer Frage: Thema und Atlas getrennt, jeweils mit Namen
+  const f = await ask({ frage: "Wie interagieren Lagerhof und Auftragswesen?" }, opts(src));
+  assert.deepEqual(f.bezug?.teile?.map((t) => `${t.art}:${t.id}:${t.name}`),
+                   ["thema:auftragswesen:Auftragswesen (Bereich)", "atlas:sd-lagerhof:Lagerhof", "atlas:sd-auftragswesen:Auftragswesen"]);
+  assert.equal(f.bezug?.herkunft, "aus der Frage");
+});
+
+const INDEX2 = [
+  "## Subdomänen", "", "| Subdomäne | Name | Kontexte |", "|---|---|---|",
+  "| `sd-lagerhof` | Lagerhof | 1 |", "| `sd-zoll-einfuhr` | Zoll & Einfuhr | 1 |", "",
+  "## Kontexte", "", "| Kontext | Subdomain | Owner |", "|---|---|---|",
+  "| `ctx-verladung` Verladung | sd-lagerhof |  |", "| `ctx-zollanmeldung` Zollanmeldung | sd-zoll-einfuhr |  |", "",
+  "## Nachrichten", "", "| Nachricht | Typ | Reife | von | an |", "|---|---|---|---|---|",
+  "| `msg-ware-verladen` Ware verladen | event | agreed | `ctx-verladung` | `ctx-zollanmeldung` |", "",
+].join("\n");
+
+test("Chat: Namen mit 'und'/'&' und Tippfehler erkennen; Ungefähres führt zur Rückfrage, nie zum alten Bezug", async () => {
+  const atlas = parseAtlas(INDEX2)!;
+  assert.deepEqual(matchAtlas("und ein bild vom zoll und einfur context", atlas), ["sd-zoll-einfuhr"]);
+  assert.deepEqual(matchAtlas("Zoll and Einfuhr", atlas), ["sd-zoll-einfuhr"]);
+  assert.deepEqual(matchAtlas("ein Bild vom Lagerhoff", atlas), ["sd-lagerhof"], "ein Tippfehler im Namen");
+  const src = new MemorySource({ "entities/contexts/_index.md": INDEX2 });
+  const gewaehlt = { atlas: ["sd-lagerhof"], herkunft: "gewählt" };
+  // was die Frage nennt, geht vor dem gewaehlten Bezug
+  const r = await ask({ frage: "und ein bild vom zoll und einfur context", bezug: gewaehlt }, opts(src));
+  assert.equal(r.skill, "bild-kontexte");
+  assert.ok(r.antwort?.startsWith("**Zoll & Einfuhr** – Domain Atlas"), r.antwort);
+  // nur ein Teil des Namens: nachfragen, der Bezug bleibt
+  const q = await ask({ frage: "Zeichne den Einfuhr-Kontext", bezug: gewaehlt }, opts(src));
+  assert.ok(q.antwort?.startsWith("Welchen Kontext meinst du?") && q.antwort.includes("**Zoll & Einfuhr** (Subdomäne)"), q.antwort);
+  assert.deepEqual([q.bezug?.atlas, q.bezug?.herkunft], [["sd-lagerhof"], "gewählt"]);
+  // ohne Namen: der gewaehlte Bezug
+  const b = await ask({ frage: "kannst du ein bild des contexts bauen", bezug: gewaehlt }, opts(src));
+  assert.ok(b.antwort?.startsWith("**Lagerhof** – Domain Atlas"), b.antwort);
+});
+
 test("Bilder: Themenbaum-Kästen tragen den Pfad ihrer Notiz", async () => {
   const src = new MemorySource({
     "entities/projects/dach.md": "---\ntype: project\ntitle: Dach\n---\n",

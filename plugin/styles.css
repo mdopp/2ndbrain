@@ -171,3 +171,9 @@ details[open] > .sb-summary::before { transform: rotate(90deg); }
 
 /* Bilder im Chat und in Notizen: Kasten mit Notiz (click in core/chatBilder.ts) */
 .mermaid .clickable[title] { cursor: pointer; }
+
+/* Bezug im Chat: jeder Teil ein Kaestchen mit x (views/chat.ts) */
+.sb-chat-teile { flex-wrap: wrap; row-gap: 2px; }
+.sb-chat-pill { display: inline-flex; align-items: center; gap: 1px; padding: 0 0 0 6px; border-radius: 8px;
+  background: var(--background-primary); max-width: 100%; }
+.sb-chat-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

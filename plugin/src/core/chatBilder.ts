@@ -176,6 +176,7 @@ async function notePaths(w: World): Promise<Map<string, string>> {
 
 async function bildVerlauf(scope: Scope, w: World, window: Window | null): Promise<Picture> {
   const slug = (scope.themen ?? [])[0];
+  if (!slug) return ["Für einen Verlauf ein Thema nennen oder seine Notiz öffnen.", []];
   const [start, lbl] = window ?? [addDays(w.today, -30), "letzte 30 Tage"];
   // [Datum, Art, Text, Unterthema (Name), Thema des Eintrags (Slug)]
   let events: [string, string, string, string, string][] = (await logOf(slug, w)).filter((e) => e[0] >= start)
@@ -569,12 +570,27 @@ function asLinks(v: unknown): string[] {
 // X?" und "Zeig mir die offenen Punkte" sind keine Bildwuensche)
 const STARK = new RegExp(`(?<!${W})(zeichne${W}*|bild|bilder|schaubild|diagramm${W}*|diagram|grafik|mermaid|visualis${W}*|skizz${W}*|${W}*malen|male)(?!${W})`, "u");
 const SCHWACH = new RegExp(`(?<!${W})(zeig${W}*)(?!${W})`, "u");
-const ATLAS_FRAGE = /kontext|subdom|domäne|domaene|nachricht|event(?!\s*log)|command|query|schnittstell|interagier|interaktion|zusammenspiel|kommunizier|austausch/;
+// deutsch und englisch ("Bild des Contexts", "context map", "wie interagieren …")
+const ATLAS_FRAGE = new RegExp("kontext|context|subdom|domäne|domaene|domain|nachricht|message|event(?!\\s*log)|command"
+  + "|query|schnittstell|interface|interagier|interakt|interact|zusammenspiel|kommunizier|communicat|austausch");
 const SOFTWARE = /system|software|c4|likec4|umgesetzt|abgebildet|implementier/;
 
 /** Fragt die Frage nach dem Zusammenspiel von Kontexten (Atlas)? */
 export function isAtlasQuestion(frage: string): boolean {
   return ATLAS_FRAGE.test(frage.toLowerCase());
+}
+
+/** Die Bild-Art des Modells gegen die Daten pruefen - der Code entscheidet: Atlas-Eintraege zeichnet
+ *  nur das Kontext-Bild, ein Verlauf braucht ein Thema; "zeichne", "Bild", "Diagramm" sind immer ein
+ *  Bildwunsch, auch wenn das Modell keinen sieht. */
+export function checkPicture(bild: string | null, frage: string, scope: Scope): string | null {
+  const q = frage.toLowerCase();
+  if (!bild) return STARK.test(q) || /^\s*mal(?!\p{L})/u.test(q) ? pictureWish(frage, scope) : null;
+  const atlas = (scope.atlas ?? []).length > 0;
+  const themen = (scope.themen ?? []).length > 0;
+  if (bild !== "bild-kontexte" && atlas && !themen) return "bild-kontexte";
+  if (bild === "bild-verlauf" && !themen) return atlas ? "bild-kontexte" : null;
+  return bild;
 }
 
 /** Bittet die Frage um ein Bild, das ein Bild-Skill genau zeichnen kann? */

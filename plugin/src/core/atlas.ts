@@ -91,51 +91,132 @@ export function norm(s: string): string {
     .split("ß").join("ss").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-/** Namen, unter denen ein Eintrag in einer Frage vorkommen kann: der Name (ohne Klammer-Zusatz)
- *  und die ID ohne Praefix ("sd-lager-hof" -> "lager hof"). */
-function namen(id: string, name: string): string[] {
-  const out = new Set<string>();
-  const n = norm(name.replace(/\s*\([^)]*\)\s*$/, ""));
-  if (n.length >= 3) out.add(n);
-  const ausId = norm(id.replace(/^(sd|ctx)-/, ""));
-  if (ausId.length >= 4 && ausId.includes(" ")) out.add(ausId);
-  return [...out];
+// Fuellwoerter zaehlen beim Namensvergleich nicht: "Zoll & Einfuhr" = "zoll und einfuhr" = "zoll and einfuhr"
+const FUELL = new Set(["und", "and", "of", "the", "der", "die", "das", "des", "dem", "den", "von", "vom", "zum", "zur",
+                       "fuer", "for", "im", "in"]);
+
+function woerter(s: string): string[] {
+  return norm(s).split(" ").filter((w) => w && !FUELL.has(w));
+}
+
+/** Editierabstand (Levenshtein). */
+function abstand(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Gleich oder ein Tippfehler: ab 5 Zeichen ein Unterschied, ab 9 Zeichen zwei ("settlment"). */
+export function aehnlich(a: string, b: string): boolean {
+  if (a === b) return true;
+  const n = Math.max(a.length, b.length);
+  if (n < 5 || Math.abs(a.length - b.length) > 2) return false;
+  return abstand(a, b) <= (n >= 9 ? 2 : 1);
+}
+
+/** Namen, unter denen ein Eintrag in einer Frage vorkommen kann, als Wortfolgen: der Name (ohne
+ *  Klammer-Zusatz) und die ID ohne Praefix ("sd-lager-hof" -> lager hof). */
+function namen(id: string, name: string): string[][] {
+  const out: string[][] = [];
+  const a = woerter(name.replace(/\s*\([^)]*\)\s*$/, ""));
+  if (a.join(" ").length >= 3) out.push(a);
+  const b = woerter(id.replace(/^(sd|ctx)-/, ""));
+  if (b.length >= 2 && b.join(" ") !== a.join(" ")) out.push(b);
+  return out;
 }
 
 /** Subdomaenen und Kontexte, die eine Frage nennt - in der Reihenfolge der Frage, laengster Name
- *  zuerst (ein Kontext "Lagerhof" schlaegt nicht die Subdomaene "Lagerhof Nord"). */
+ *  zuerst (ein Kontext "Lagerhof" schlaegt nicht die Subdomaene "Lagerhof Nord"). Erst wortgleich,
+ *  dann mit Tippfehlern - dort nur, wenn genau ein Eintrag passt. */
 export function matchAtlas(frage: string, atlas: Atlas): string[] {
-  const hay = ` ${norm(frage)} `;
-  const alle: { id: string; name: string }[] = [];
-  for (const s of atlas.subdomaenen.values()) for (const n of namen(s.id, s.name)) alle.push({ id: s.id, name: n });
-  for (const k of atlas.kontexte.values()) for (const n of namen(k.id, k.name)) alle.push({ id: k.id, name: n });
+  const q = woerter(frage);
+  const alle: { id: string; toks: string[]; key: string }[] = [];
+  const add = (id: string, name: string) => { for (const toks of namen(id, name)) alle.push({ id, toks, key: toks.join(" ") }); };
+  for (const s of atlas.subdomaenen.values()) add(s.id, s.name);
+  for (const k of atlas.kontexte.values()) add(k.id, k.name);
   // ein Name, den mehrere Eintraege tragen (zwei Kontexte "Verladung"), entscheidet nichts
   const ids = new Map<string, Set<string>>();
-  for (const k of alle) ids.set(k.name, (ids.get(k.name) ?? new Set<string>()).add(k.id));
-  const eindeutig = (k: { id: string; name: string }): boolean => {
-    const s = [...ids.get(k.name)!];
+  for (const k of alle) ids.set(k.key, (ids.get(k.key) ?? new Set<string>()).add(k.id));
+  const eindeutig = (k: { id: string; key: string }): boolean => {
+    const s = [...ids.get(k.key)!];
     if (s.length === 1) return true;
     // Subdomaene und ihr gleichnamiger Kontext ("Zoll"): die Subdomaene umfasst ihn
     const sds = s.filter((i) => atlas.subdomaenen.has(i));
     return sds.length === 1 && k.id === sds[0] && s.every((i) => i === sds[0] || atlas.kontexte.get(i)?.sd === sds[0]);
   };
-  const kandidaten = alle.filter(eindeutig).sort((a, b) => b.name.length - a.name.length);
-  const belegt: [number, number][] = [];
+  const kandidaten = alle.filter(eindeutig).sort((a, b) => b.toks.length - a.toks.length || b.key.length - a.key.length);
+  const belegt = new Set<number>();
   const treffer: { id: string; pos: number }[] = [];
-  for (const k of kandidaten) {
-    let from = 0;
-    for (;;) {
-      const i = hay.indexOf(` ${k.name} `, from);
-      if (i < 0) break;
-      const [a, b] = [i + 1, i + 1 + k.name.length];
-      from = i + 1;
-      if (belegt.some(([x, y]) => a < y && b > x)) continue;
-      belegt.push([a, b]);
-      if (!treffer.some((t) => t.id === k.id)) treffer.push({ id: k.id, pos: a });
-      break;
+  const passt = (i: number, toks: string[], tipp: boolean) =>
+    toks.every((t, j) => i + j < q.length && !belegt.has(i + j) && (tipp ? aehnlich(q[i + j], t) : q[i + j] === t));
+  const nimm = (id: string, i: number, n: number) => {
+    for (let j = i; j < i + n; j++) belegt.add(j);
+    if (!treffer.some((t) => t.id === id)) treffer.push({ id, pos: i });
+  };
+  for (const k of kandidaten) {                       // wortgleich
+    for (let i = 0; i + k.toks.length <= q.length; i++) {
+      if (passt(i, k.toks, false)) { nimm(k.id, i, k.toks.length); break; }
     }
   }
+  const tipp = new Map<string, { i: number; n: number; ids: Set<string> }>();   // mit Tippfehlern
+  for (const k of kandidaten) {
+    for (let i = 0; i + k.toks.length <= q.length; i++) {
+      if (!passt(i, k.toks, true)) continue;
+      const f = tipp.get(`${i}:${k.toks.length}`) ?? { i, n: k.toks.length, ids: new Set<string>() };
+      tipp.set(`${i}:${k.toks.length}`, { ...f, ids: f.ids.add(k.id) });
+    }
+  }
+  for (const f of [...tipp.values()].sort((a, b) => b.n - a.n)) {
+    if (f.ids.size === 1 && [...Array(f.n).keys()].every((j) => !belegt.has(f.i + j))) nimm([...f.ids][0], f.i, f.n);
+  }
   return treffer.sort((a, b) => a.pos - b.pos).map((t) => t.id);
+}
+
+/** Viele Kontexte einer Subdomaene gewaehlt (mindestens drei und mindestens die Haelfte): die
+ *  Subdomaene selbst - "der Zoll-Kontext" meint dann die Subdomaene, nicht Einzelbilder. Zwei
+ *  ausdruecklich genannte Kontexte bleiben ein Paar ("wie haengen A und B zusammen"). Reihenfolge bleibt. */
+export function zusammenfassen(ids: string[], atlas: Atlas): string[] {
+  let out = [...ids];
+  for (const sd of atlas.subdomaenen.keys()) {
+    const alle = [...atlas.kontexte.values()].filter((k) => k.sd === sd).map((k) => k.id);
+    const drin = alle.filter((k) => out.includes(k));
+    if (drin.length < 3 || drin.length * 2 < alle.length) continue;
+    const erst = Math.min(...drin.map((k) => out.indexOf(k)));
+    out = out.flatMap((x, i) => (i === erst ? [sd] : drin.includes(x) ? [] : [x]));
+  }
+  return [...new Set(out)];
+}
+
+// Woerter einer Bild- oder Atlas-Frage, die keinen Eintrag bezeichnen
+const ALLGEMEIN = new Set(["bild", "bilder", "diagramm", "diagram", "mermaid", "zeichne", "zeichnen", "zeig", "zeige", "zeigen",
+  "male", "malen", "kontext", "kontexte", "kontexts", "context", "contexts", "subdomaene", "subdomaenen", "subdomain",
+  "domain", "domaene", "atlas", "nachricht", "nachrichten", "message", "messages", "event", "events", "kannst", "bitte",
+  "zusammen", "interagieren", "interagiert", "spielen", "machen", "bauen", "erstellen", "noch", "auch", "einmal"]);
+
+/** Eintraege, zu denen Woerter der Frage passen, ohne dass ein ganzer Name genannt ist ("der
+ *  Einfuhr-Kontext") - fuer die Rueckfrage "meinst du …?" statt eines Bildes vom falschen Kontext. */
+export function aehnlicheAtlas(frage: string, atlas: Atlas, max = 6): { id: string; name: string; art: string }[] {
+  const q = woerter(frage).filter((w) => w.length >= 4 && !ALLGEMEIN.has(w));
+  if (!q.length) return [];
+  const passt = (w: string, t: string) => w === t || (w.length >= 5 && t.startsWith(w)) || (w.length >= 7 && aehnlich(w, t));
+  const out: { id: string; name: string; art: string; n: number }[] = [];
+  const pruefe = (id: string, name: string, art: string) => {
+    const toks = namen(id, name).flat();
+    const n = q.filter((w) => toks.some((t) => passt(w, t))).length;
+    if (n) out.push({ id, name, art, n });
+  };
+  for (const s of atlas.subdomaenen.values()) pruefe(s.id, s.name, "Subdomäne");
+  for (const k of atlas.kontexte.values()) {
+    pruefe(k.id, k.name, `Kontext in ${atlas.subdomaenen.get(k.sd)?.name ?? k.sd}`);
+  }
+  return out.sort((a, b) => b.n - a.n || Number(b.art === "Subdomäne") - Number(a.art === "Subdomäne"))
+    .slice(0, max).map(({ id, name, art }) => ({ id, name, art }));
 }
 
 /** Notizen im Vault, die zu einem Atlas-Eintrag gehoeren (`atlas_id` im Frontmatter): Thema vor

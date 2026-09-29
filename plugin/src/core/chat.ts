@@ -2,8 +2,9 @@
 // Ausschnitt aus vorhandenen Ergebnissen (Stand-Block, Ampel, offene Punkte, Log, Beteiligte), das
 // lokale Modell formuliert nur daraus. Nur "Offene Fragen" rechnet die Engine (`2ndbrain frage`).
 
-import { chatPicture, isAtlasQuestion, isPicture, pictureWish } from "./chatBilder";
-import { Atlas, loadAtlas, matchAtlas, norm } from "./atlas";
+import { chatPicture, checkPicture, isAtlasQuestion, isPicture, pictureWish } from "./chatBilder";
+import { Atlas, aehnlicheAtlas, loadAtlas, matchAtlas, norm, zusammenfassen } from "./atlas";
+import { Absicht, absichtLesen, absichtNachrichten, kandidaten } from "./absicht";
 import { addDays, weekday } from "./datum";
 import { Names, Project, aliasMap, asList, listSorted, loadProjects } from "./entities";
 import { logEntries, newestFirst } from "./themenlog";
@@ -106,16 +107,41 @@ export class World {
 
 // ------------------------------------------------------------------ Bezug
 
-/** `atlas`: Subdomaenen und Kontexte des Domain Atlas, die die Frage nennt (IDs). */
-export interface Scope { themen?: string[]; personen?: string[]; termin?: string | null; atlas?: string[] }
+/** `atlas`: Subdomaenen und Kontexte des Domain Atlas, die die Frage nennt (IDs); `atlasGefragt`: die
+ *  Frage fragt nach Kontexten (dann kommt der Atlas in den Ausschnitt). */
+export interface Scope {
+  themen?: string[]; personen?: string[]; termin?: string | null; atlas?: string[]; atlasGefragt?: boolean;
+}
 
-/** Bezug aus der aktiven Notiz: Thema, Person, Termin oder Reihe. */
+/** Atlas-IDs (Subdomaene `sd-`, Kontext `ctx-`) aus Frontmatter-Feldern. */
+function atlasIds(fm: Frontmatter, ...keys: string[]): string[] {
+  return [...new Set(keys.flatMap((k) => asList(fm[k]).map((x) => strip(str(x)))).filter((x) => /^(sd|ctx)-/.test(x)))];
+}
+
+/** Die Atlas-Eintraege zu Themen: `atlas_id` des Themas, sonst die gleichnamige Subdomaene oder der
+ *  gleichnamige Kontext (Thema "lagerhof" -> `sd-lagerhof`, wie begriffsindex.kanon_themen). */
+export function atlasOfTopics(themen: string[], atlas: Atlas, w: World): string[] {
+  const out: string[] = [];
+  for (const s of themen) {
+    const eigene = atlasIds(w.projects.get(s)?.fm ?? {}, "atlas_id")
+      .filter((id) => atlas.subdomaenen.has(id) || atlas.kontexte.has(id));
+    const gleich = atlas.subdomaenen.has(`sd-${s}`) ? [`sd-${s}`] : atlas.kontexte.has(`ctx-${s}`) ? [`ctx-${s}`] : [];
+    for (const id of eigene.length ? eigene : gleich) if (!out.includes(id)) out.push(id);
+  }
+  return out.slice(0, 3);
+}
+
+/** Bezug aus der aktiven Notiz: Thema, Person, Termin, Reihe - oder ein Atlas-Eintrag (Glossar-Seite
+ *  mit `atlas_id`, System-Seite mit `atlas_kontexte`). */
 export function scopeFromFile(rel: string, w: World): Scope {
   if (!rel || !w.src.exists(rel)) return {};
   const fm = w.src.frontmatter(rel);
   const typ = orStr(fm.type);
   const parent = rel.slice(0, rel.lastIndexOf("/"));
   if (parent === DIRS.projects || typ === "project") return { themen: [stem(rel)] };
+  if (parent === "entities/glossary" || parent === DIRS.systems || parent === DIRS.contexts) {
+    return { atlas: atlasIds(fm, "atlas_id", "atlas_kontexte") };
+  }
   if (parent === DIRS.people || typ === "person") return { personen: [stem(rel)] };
   if (parent === DIRS.forums || typ === "forum") {
     const mit = asList(truthy(fm.mit) ? fm.mit : []).map(slugOf);
@@ -499,8 +525,9 @@ export async function buildContext(frage: string, skill: SkillRecipe | null, sco
         .sort((a, b) => (order[w.projects.get(a)!.health] ?? 2) - (order[w.projects.get(b)!.health] ?? 2) || (a < b ? -1 : a > b ? 1 : 0));
       for (const k of kids.slice(0, 6)) blocks.push(await bThema(k, w, window, true));
     }
-    if ((scope.atlas ?? []).length && isAtlasQuestion(frage)) blocks.unshift(await bAtlas(scope.atlas ?? [], w));
-    if (quelle === "auto" && !themen.length && !personen.length && !(scope.atlas ?? []).length) {
+    const mitAtlas = (scope.atlas ?? []).length > 0 && (scope.atlasGefragt ?? isAtlasQuestion(frage));
+    if (mitAtlas) blocks.unshift(await bAtlas(scope.atlas ?? [], w));
+    if (quelle === "auto" && !themen.length && !personen.length && !mitAtlas) {
       if (window) blocks.push(await bBewegung(w, window, []));
       blocks.push(bRadar(w));
       if (/offen|nachfass|aufgabe|überfällig|ueberfaellig|warte/.test(frage.toLowerCase())) blocks.push(await bNachfassen(w));
@@ -550,13 +577,20 @@ export interface ChatRequest {
   frage?: string;
   skill?: string | null;
   ziel?: { datei?: string };
-  bezug?: Scope | null;
+  /** Bezug der vorigen Antwort - oder von Hand gewaehlt (`herkunft: "gewählt"`, Knopf im Chat) */
+  bezug?: (Scope & { herkunft?: string }) | null;
   verlauf?: { rolle: string; text: string }[];
 }
 
+/** Ein Teil des Bezugs, einzeln entfernbar (Kaestchen ueber der Eingabe). */
+export interface BezugTeil { art: "thema" | "person" | "atlas" | "termin"; id: string; name: string }
+
 export interface ChatBezug {
   themen: string[]; personen: string[]; termin: string | null; atlas: string[]; anzeige: string[]; herkunft: string;
+  teile: BezugTeil[];
 }
+
+export const GEWAEHLT = "gewählt";
 
 export interface ChatAnswer {
   ok: boolean;
@@ -606,6 +640,31 @@ export interface AskOptions {
   files: () => Set<string>;
   /** Name des Vaults: Kaesten in Bildern tragen damit eine obsidian://-Adresse. */
   vault?: string;
+  /** Kurzer Modellaufruf fuer die Absicht (Bild-Art, Themen, Atlas aus einer Liste); fehlt er oder
+   *  scheitert er, gelten die Regeln. */
+  absicht?: (messages: ChatMessage[]) => Promise<string>;
+}
+
+/** Die Absicht einer Frage vom Modell (core/absicht.ts) - mit dem Bezug, damit "das" und "den Kontext"
+ *  aufloesbar sind. null bei Fehler oder unbrauchbarer Antwort. */
+async function modellAbsicht(frage: string, req: ChatRequest, w: World, atlas: Atlas | null, fileScope: Scope,
+                             fn: (messages: ChatMessage[]) => Promise<string>): Promise<Absicht | null> {
+  const name = (id: string) => atlas?.subdomaenen.get(id)?.name ?? atlas?.kontexte.get(id)?.name ?? id;
+  const teile = (s: Scope) => [...(s.themen ?? []).map((t) => `Thema ${w.topicName(t)} [thema:${t}]`),
+                               ...(s.atlas ?? []).map((a) => `${name(a)} [${a}]`),
+                               ...(s.personen ?? []).map((p) => `Person ${w.personName(p)}`)];
+  const bezug = [
+    ...(teile(fileScope).length ? [`offene Notiz: ${teile(fileScope).join(", ")}`] : []),
+    ...(req.bezug && teile(req.bezug).length
+      ? [`${req.bezug.herkunft === GEWAEHLT ? "gewählt" : "vorige Antwort"}: ${teile(req.bezug).join(", ")}`] : []),
+  ].join("; ");
+  const vorher = [...(req.verlauf ?? [])].reverse().find((t) => t.rolle === "nutzer")?.text ?? "";
+  const kand = kandidaten([...w.projects.values()], atlas);
+  try {
+    return absichtLesen(await fn(absichtNachrichten(frage, kand, bezug, pySlice(str(vorher), 0, 300))), kand);
+  } catch {
+    return null;
+  }
 }
 
 /** Eine Frage beantworten. Der Frage-Modus "Offene Fragen" (Atlas) laeuft nur in der Engine. */
@@ -619,18 +678,44 @@ export async function ask(req: ChatRequest, opts: AskOptions): Promise<ChatAnswe
   // Bezug: was die Frage nennt > aktive Notiz > Bezug der vorigen Antwort (Nachfrage)
   const textScope = scopeFromText(frage, w);
   const atlas = await w.memo("atlas", () => loadAtlas(opts.src));
-  const atlasHits = atlas ? matchAtlas(frage, atlas) : [];
   const fileScope = scopeFromFile(req.ziel?.datei ?? "", w);
   const prev = req.bezug ?? {};
-  // Atlas-Namen machen die Frage nur dann zum Bezug, wenn sie nach Kontexten fragt - sonst verdraengte
-  // ein zufaellig genanntes Wort ("Verladung") die offene Notiz
-  const fromText = textScope.themen.length > 0 || textScope.personen.length > 0
-    || (atlasHits.length > 0 && isAtlasQuestion(frage));
-  const fromFile = !fromText && Object.values(fileScope).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
-  const src: Scope = fromText ? textScope : fromFile ? fileScope : prev;
+  // Was gemeint ist, waehlt das Modell aus einer festen Liste (core/absicht.ts); Personen bleiben bei
+  // den Regeln. Ohne Modell oder mit unbrauchbarer Antwort gelten die Regeln allein.
+  const absicht = !skill && frage && opts.absicht
+    ? await modellAbsicht(frage, req, w, atlas, fileScope, opts.absicht) : null;
+  const atlasHits = absicht ? absicht.atlas : atlas ? matchAtlas(frage, atlas) : [];
+  // Atlas-Namen (und eine Atlas-Seite als offene Notiz) machen nur dann den Bezug, wenn die Frage nach
+  // Kontexten fragt - sonst verdraengte ein zufaellig genanntes Wort ("Verladung") die offene Notiz
+  const atlasFrage = absicht ? absicht.bild === "bild-kontexte" || absicht.atlas.length > 0 : isAtlasQuestion(frage);
+  const genannt = absicht ? [...new Set([...absicht.themen, ...textScope.themen])] : textScope.themen;
+  const hat = (s: Scope) => (s.themen?.length ?? 0) > 0 || (s.personen?.length ?? 0) > 0 || !!s.termin
+    || (atlasFrage && (s.atlas?.length ?? 0) > 0);
+  const fromText = genannt.length > 0 || textScope.personen.length > 0 || (atlasHits.length > 0 && atlasFrage);
+  const fromFile = !fromText && hat(fileScope);
+  const src: Scope = fromText ? { ...textScope, themen: genannt } : fromFile ? fileScope : prev;
   const scope: Scope = { themen: [...(src.themen ?? [])], personen: [...(src.personen ?? [])],
                          termin: fromText ? null : (src.termin ?? null),
-                         atlas: atlasHits.length ? atlasHits : fromText ? [] : [...(src.atlas ?? [])] };
+                         atlas: atlasHits.length ? atlasHits : fromText ? [] : [...(src.atlas ?? [])],
+                         atlasGefragt: atlasFrage };
+  // Frage nach Kontexten ohne erkannten Atlas-Namen: ein genanntes Thema mit Atlas-Gegenstueck; nennt
+  // die Frage etwas, das nur ungefaehr passt, eine Rueckfrage - nie still der alte Bezug; sonst ("Bild
+  // des Kontexts") der Kontext des Bezugs. Mit Modell: seine Rueckfrage, sonst die Regeln.
+  let rueckfrage: string | null = absicht?.rueckfrage ?? null;
+  if (absicht && !rueckfrage && atlasFrage && atlas && !scope.atlas?.length) {
+    scope.atlas = atlasOfTopics(scope.themen ?? [], atlas, w);
+  }
+  if (!absicht && atlasFrage && atlas && !atlasHits.length) {
+    const ausThema = fromText ? atlasOfTopics(scope.themen ?? [], atlas, w) : [];
+    const aehnlich = ausThema.length ? [] : aehnlicheAtlas(frage, atlas);
+    if (ausThema.length) scope.atlas = ausThema;
+    else if (aehnlich.length) {
+      rueckfrage = "Welchen Kontext meinst du? Im Atlas passt kein Name genau zu deiner Frage – ähnlich sind: "
+        + aehnlich.map((a) => `**${a.name}** (${a.art})`).join(", ")
+        + ". Nenne den Namen so, oder wähle ihn über das Fadenkreuz („Bezug wählen“).";
+    } else if (!scope.atlas?.length) scope.atlas = atlasOfTopics(scope.themen ?? [], atlas, w);
+  }
+  if (atlas && scope.atlas?.length) scope.atlas = zusammenfassen(scope.atlas, atlas);
   const window = timeWindow(frage, opts.today);
   const themen = scope.themen ?? [];
   const personen = scope.personen ?? [];
@@ -643,15 +728,23 @@ export async function ask(req: ChatRequest, opts: AskOptions): Promise<ChatAnswe
   const prevAny = (prev.themen?.length ?? 0) > 0 || (prev.personen?.length ?? 0) > 0 || !!prev.termin
     || (prev.atlas?.length ?? 0) > 0;
   const atlasName = (id: string) => atlas?.subdomaenen.get(id)?.name ?? atlas?.kontexte.get(id)?.name ?? id;
+  const termin = scope.termin ?? null;
   const bezug: ChatBezug = {
-    themen, personen, termin: scope.termin ?? null, atlas: atlasIds,
+    themen, personen, termin, atlas: atlasIds,
     anzeige: [...themen.map((s) => w.topicName(s)), ...personen.map((p) => w.personName(p)),
               ...atlasIds.filter((id) => !themen.some((t) => norm(w.topicName(t)).startsWith(norm(atlasName(id)))))
                 .map((id) => `${atlasName(id)} (Atlas)`)],
-    herkunft: fromText ? "aus der Frage" : fromFile ? "aus der offenen Notiz" : prevAny ? "aus der vorigen Antwort" : "",
+    herkunft: fromText ? "aus der Frage" : fromFile ? "aus der offenen Notiz"
+      : prevAny ? (prev.herkunft === GEWAEHLT ? GEWAEHLT : "aus der vorigen Antwort") : "",
+    teile: [...themen.map((id): BezugTeil => ({ art: "thema", id, name: w.topicName(id) })),
+            ...personen.map((id): BezugTeil => ({ art: "person", id, name: w.personName(id) })),
+            ...atlasIds.map((id): BezugTeil => ({ art: "atlas", id, name: atlasName(id) })),
+            ...(termin ? [{ art: "termin" as const, id: termin, name: stem(termin) }] : [])],
   };
-  const picture = skill ? (isPicture(skill.quelle) ? skill.quelle : null) : pictureWish(frage, scope);
   const secs = () => Math.round((Date.now() - t0) / 100) / 10;
+  if (rueckfrage) return { ok: true, antwort: rueckfrage, bezug, quellen: [], skill: null, dauer_s: secs() };
+  const picture = skill ? (isPicture(skill.quelle) ? skill.quelle : null)
+    : absicht ? checkPicture(absicht.bild, frage, scope) : pictureWish(frage, scope);
   if (picture) {                             // Bild aus den Daten - ohne Modell
     const [md, used] = await chatPicture(picture, scope, w, window);
     return { ok: true, antwort: checkLinks(md, "", opts.files), bezug, quellen: used,

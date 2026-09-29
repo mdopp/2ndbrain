@@ -73,6 +73,8 @@ const CAL_SECRET = "2ndbrain-kalender-url";
 // Nur am Desktop - am Handy laeuft keine Engine, dort fuehrt der Sync zusammen.
 const AUTO_LOCK = ".2ndbrain/daten/.auto.lock";
 const AUTO_LOCK_MAX_AGE_MS = 30 * 60_000;
+// Zeitlimit fuer die Absicht einer Chat-Frage (erster Aufruf nach einer Pause ~3 s, sonst < 1 s)
+const ABSICHT_TIMEOUT_S = 15;
 
 export default class SecondBrainPlugin extends Plugin {
   settings: SecondBrainSettings = { ...DEFAULT_SETTINGS };
@@ -364,6 +366,12 @@ export default class SecondBrainPlugin extends Plugin {
       llm: async (messages) => stripThink(await complete(this.httpPost, this.llm, messages, { maxTokens: 900, temperature: 0.2 })),
       files: () => new Set(this.app.vault.getMarkdownFiles().map((f) => f.basename.toLowerCase())),
       vault: this.app.vault.getName(),
+      // Was gemeint ist, waehlt das Modell (kurz, mit eigenem Zeitlimit); ist es nicht erreichbar,
+      // entscheiden sofort die Regeln
+      absicht: this.llmState.ok
+        ? async (messages) => stripThink(await complete(this.httpPost, { ...this.llm, timeoutS: ABSICHT_TIMEOUT_S }, messages,
+                                                        { maxTokens: 300, temperature: 0.1 }))
+        : undefined,
     });
   }
 

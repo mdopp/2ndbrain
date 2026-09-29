@@ -1,7 +1,8 @@
 import { ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, setIcon } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import type { ChatRequest } from "../core/chat";
+import { BezugTeil, ChatRequest, GEWAEHLT } from "../core/chat";
 import { exampleTopics } from "../core/ansicht";
+import { BezugModal } from "./bezug";
 
 export const VIEW_TYPE_CHAT = "2ndbrain-chat";
 
@@ -9,8 +10,17 @@ export const VIEW_TYPE_CHAT = "2ndbrain-chat";
 export interface ChatSkill { name: string; label: string; beschreibung: string; ziel: string; quelle: string }
 
 interface Bezug { themen: string[]; personen: string[]; termin: string | null; anzeige: string[]; atlas?: string[];
-                  /** "aus der Frage" | "aus der offenen Notiz" | "aus der vorigen Antwort" */
-                  herkunft?: string }
+                  /** "aus der Frage" | "aus der offenen Notiz" | "aus der vorigen Antwort" | "gewählt" */
+                  herkunft?: string;
+                  /** einzeln entfernbare Teile (Themen, Personen, Atlas, Termin) */
+                  teile?: BezugTeil[] }
+
+/** Bezug aus Teilen - fuer eine Wahl von Hand und nach dem Entfernen eines Teils. */
+function bezugAus(teile: BezugTeil[], herkunft: string): Bezug {
+  const von = (art: BezugTeil["art"]) => teile.filter((t) => t.art === art).map((t) => t.id);
+  return { themen: von("thema"), personen: von("person"), atlas: von("atlas"), termin: von("termin")[0] ?? null,
+           anzeige: teile.map((t) => (t.art === "atlas" ? `${t.name} (Atlas)` : t.name)), herkunft, teile };
+}
 
 /** Eine offene Frage im Frage-Modus (Skill "Offene Fragen", `kanon_vorschlaege.py`). */
 interface Karte { id: string; typ: string; markdown: string; optionen: { key: string; label: string }[]; offen: number }
@@ -43,8 +53,9 @@ const PLACEHOLDER = "Frage stellen … (Enter sendet)";
 const PLACEHOLDER_KARTE = "Einordnung oder Anmerkung zur Frage … (Enter speichert)";
 const MAX_INPUT_PX = 160;          // so hoch waechst das Eingabefeld hoechstens
 
-/** Pfade, deren Notiz ein Bezug sein kann: Thema, Person, Reihe, Termin. */
-const SCOPE_RE = /^(entities\/(projects|people|forums)\/|active-meetings\/|archive\/meetings\/)/;
+/** Pfade, deren Notiz ein Bezug sein kann: Thema, Person, Reihe, Termin - und Atlas-Seiten (Glossar mit
+ *  `atlas_id`, System mit `atlas_kontexte`, Kontext-Verzeichnis) fuer Fragen nach Kontexten. */
+const SCOPE_RE = /^(entities\/(projects|people|forums|glossary|systems|contexts)\/|active-meetings\/|archive\/meetings\/)/;
 
 
 /** "Fragen an den Vault": Chat mit dem lokalen Modell. Der Code (core/chat.ts) sucht den
@@ -133,7 +144,11 @@ export class ChatView extends ItemView {
   /** Aktive Notiz als Bezug, solange der Nutzer ihn nicht weggeklickt hat. */
   private activeScopeFile(): string | null {
     const f = this.app.workspace.getActiveFile();
-    const path = f && SCOPE_RE.test(f.path) ? f.path : null;
+    let path = f && SCOPE_RE.test(f.path) ? f.path : null;
+    if (f && path && /^entities\/(glossary|systems|contexts)\//.test(path)) {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
+      if (!fm.atlas_id && !fm.atlas_kontexte) path = null;          // Atlas-Seite nur mit Atlas-Bezug
+    }
     if (path !== this.lastFile) {
       this.lastFile = path;
       this.useActive = true;                  // neue Notiz: Bezug wieder an
@@ -141,10 +156,12 @@ export class ChatView extends ItemView {
     return this.useActive ? path : null;
   }
 
-  /** Eine schmale Zeile ueber der Eingabe: Bezug als Chip, rechts Neues Gespraech und klein/gross. */
+  /** Eine schmale Zeile ueber der Eingabe: Bezug als Chip (jeder Teil einzeln entfernbar, per Knopf neu
+   *  waehlbar), rechts Neues Gespraech und klein/gross. */
   private renderBar(): void {
     this.barEl.empty();
     const f = this.activeScopeFile();
+    const teile = this.s.bezug?.teile ?? [];
     if (f) {
       const chip = this.barEl.createDiv({ cls: "sb-chat-chip", attr: { title: f } });
       chip.createSpan({ cls: "sb-muted", text: "Bezug:" });
@@ -152,9 +169,23 @@ export class ChatView extends ItemView {
       const x = chip.createEl("button", { cls: "sb-icon-btn", attr: { "aria-label": "Ohne diese Notiz fragen" } });
       setIcon(x, "x");
       x.onclick = () => { this.useActive = false; this.renderBar(); };
-    } else if (this.s.bezug?.anzeige?.length) {
+    } else if (teile.length) {
+      const chip = this.barEl.createDiv({ cls: "sb-chat-chip sb-chat-teile" });
+      chip.createSpan({ cls: "sb-muted", text: this.s.bezug?.herkunft === GEWAEHLT ? "Bezug:" : "Gespräch über:" });
+      for (const t of teile) {
+        const pill = chip.createSpan({ cls: "sb-chat-pill", attr: { title: t.id } });
+        pill.createSpan({ text: t.art === "atlas" ? `${t.name} (Atlas)` : t.name });
+        const x = pill.createEl("button", { cls: "sb-icon-btn", attr: { "aria-label": `${t.name} aus dem Bezug nehmen` } });
+        setIcon(x, "x");
+        x.onclick = () => this.removeTeil(t);
+      }
+    } else if (this.s.bezug?.anzeige?.length) {            // aeltere Antworten ohne Teile
       this.barEl.createDiv({ cls: "sb-chat-chip sb-muted", text: `Gespräch über: ${this.s.bezug.anzeige.join(", ")}` });
     }
+    const pick = this.barEl.createEl("button", { cls: "sb-icon-btn",
+                                                 attr: { "aria-label": "Bezug wählen: Thema, Person, Subdomäne oder Kontext" } });
+    setIcon(pick, "crosshair");
+    pick.onclick = () => void BezugModal.open(this.app, this.plugin, (t) => this.setTeil(t));
     this.barEl.createDiv({ cls: "sb-chat-spacer" });
     const reset = this.barEl.createEl("button", { cls: "sb-icon-btn", attr: { "aria-label": "Neues Gespräch" } });
     setIcon(reset, "rotate-ccw");
@@ -170,6 +201,20 @@ export class ChatView extends ItemView {
   private reset(): void {
     Object.assign(this.s, { turns: [], bezug: null, karte: null, skip: [] });
     this.refresh();
+  }
+
+  /** Von Hand gewaehlter Bezug ersetzt den bisherigen - auch die offene Notiz. */
+  private setTeil(t: BezugTeil): void {
+    this.useActive = false;
+    this.s.bezug = bezugAus([t], GEWAEHLT);
+    this.renderBar();
+  }
+
+  /** Einen Teil aus dem Bezug nehmen; der Rest bleibt. */
+  private removeTeil(t: BezugTeil): void {
+    const rest = (this.s.bezug?.teile ?? []).filter((x) => !(x.art === t.art && x.id === t.id));
+    this.s.bezug = rest.length ? bezugAus(rest, this.s.bezug?.herkunft ?? GEWAEHLT) : null;
+    this.renderBar();
   }
 
   private setKarte(k: Karte | null): void {

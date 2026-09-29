@@ -307,10 +307,21 @@ laufen: §18.
 **Bilder im Chat** zeichnet der Code aus den Daten, nicht das Modell: Themenbaum, Verlauf, Beteiligte,
 Reihen und **Kontexte** – wie Subdomänen und Kontexte des Domain Atlas zusammenspielen (die Nachrichten
 aus dem Kontext-Verzeichnis, durchgezogen = abgestimmt, gestrichelt = offen), darunter die Systeme, die
-sie umsetzen (`atlas_kontexte`), mit den Nachrichten auf die Systeme übertragen. Ein Bild entsteht nur
-auf einen Bildwunsch („zeichne“, „Bild“, „Diagramm“, „Mermaid“ …; „zeig“ nur mit einer Bild-Art wie
-Verlauf oder Themenbaum, „Sag mal …“ ist keiner); eine Frage nach Kontexten bekommt nie den
-Themenbaum. Jeder Kasten trägt den Pfad seiner Notiz im Hinweistext – ein Klick öffnet sie, im Chat wie
+sie umsetzen (`atlas_kontexte`), mit den Nachrichten auf die Systeme übertragen.
+
+**Was gemeint ist, versteht das Modell – was gezeichnet wird, entscheidet der Code** (`core/absicht.ts`):
+Das lokale Modell bekommt die Frage, den Bezug (offene Notiz, gewählter oder voriger Bezug, mit IDs) und
+eine feste Liste – Bild-Arten, Themen, Subdomänen, Kontexte – und wählt daraus (JSON, kurzer Aufruf mit
+eigenem Zeitlimit). Tippfehler, „und“ statt „&“, Teilnamen, Englisch und „den Kontext“ löst es auf. Der
+Code prüft die Wahl: nur IDs aus der Liste; Atlas-Einträge zeichnet nur das Kontext-Bild, ein Verlauf
+braucht ein Thema, „zeichne/Bild/Diagramm“ ist immer ein Bildwunsch; wählt das Modell viele Kontexte
+einer Subdomäne, gilt die Subdomäne. Personen bestimmen weiter die Regeln (nie geraten). Ohne Modell
+oder bei unbrauchbarer Antwort gelten die Regeln: Bildwunsch nur mit „zeichne“, „Bild“, „Diagramm“ …
+(„zeig“ nur mit einer Bild-Art, „Sag mal …“ nie), Atlas-Namen wortgleich oder mit kleinem Tippfehler,
+ein nur ungefähr passender Name führt zur Rückfrage – nie still der alte Bezug. Eine Frage nach
+Kontexten bekommt nie den Themenbaum. Den Bezug kann man im Chat einzeln entfernen oder neu wählen
+(Thema, Person, Subdomäne, Kontext). Treffsicherheit an echten Fragen: `plugin/tests/absicht.test.ts`
+mit `SB_ABSICHT=1 SB_VAULT=<Vault>` und `.2ndbrain/chat-fragen.json` im Vault (Regeln gegen Modell). Jeder Kasten trägt den Pfad seiner Notiz im Hinweistext – ein Klick öffnet sie, im Chat wie
 in jeder Notiz (Obsidians Mermaid entfernt obsidian://-Adressen, das Plugin öffnet selbst).
 
 ## 9. Aufbau
