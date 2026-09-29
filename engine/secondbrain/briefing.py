@@ -128,8 +128,32 @@ def _split_item(text: str) -> tuple[str, str, str]:
     if m:
         label, context = m.group(1).strip(), m.group(2).strip()
     else:
-        label, context = (rest[:70].rstrip(" .,;:") or rest), rest
+        label, context = (kuerzen(rest, 70) or rest), rest
     return owner, label, context
+
+
+def kuerzen(text: str, limit: int) -> str:
+    """Auf hoechstens `limit` Zeichen kuerzen: an einer Wortgrenze und nie mitten in einem
+    [[Link]]; gekuerzter Text endet mit "…". Ein harter Schnitt machte aus Namen "(Matt" und aus
+    Quellen kaputte Links wie "(→ [[2…"."""
+    t = " ".join(str(text or "").split())
+    if len(t) <= limit:
+        return t
+    cut = t[:limit - 1]
+    offen = cut.rfind("[[")
+    if offen != -1 and "]]" not in cut[offen:]:
+        cut = cut[:offen]                    # der Link passt nicht mehr ganz hinein: ganz weg
+    elif not t[limit - 1].isspace() and " " in cut[limit // 2:]:
+        cut = cut[:cut.rfind(" ")]           # angeschnittenes Wort weg
+    cut = cut.rstrip(" .,;:(→–—-")
+    if cut:
+        return cut + "…"
+    # nur ein langer Link am Anfang: als Text kuerzen
+    klar = _LINK_TEXT.sub(lambda m: m.group(2) or m.group(1), t)
+    return kuerzen(klar, limit) if klar != t else t[:limit - 1] + "…"
+
+
+_LINK_TEXT = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]*))?\]\]")
 
 
 def _norm(text: str) -> str:
@@ -487,10 +511,7 @@ def build_topics(meeting: dict, all_meetings: list[dict], project: dict | None,
 
 
 def _cell(text: str, limit: int = 240) -> str:
-    t = " ".join(str(text or "").split())
-    if len(t) > limit:
-        t = t[:limit - 1].rstrip() + "…"
-    return t.replace("|", "\\|")
+    return kuerzen(text, limit).replace("|", "\\|")
 
 
 def render_briefing(topics: list[dict], *, partner: str = "") -> list[str]:

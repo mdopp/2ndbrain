@@ -1,0 +1,6 @@
+# Zeilenenden im Repo: LF - auch beim Auschecken unter Windows (Tests vergleichen Text byte-genau,
+# die Vorlagen landen so im Vault, die CI laeuft unter Linux)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.whl binary

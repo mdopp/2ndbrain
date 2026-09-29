@@ -25,7 +25,8 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Sofortsuche**: Thema oder Person → Stand-Block, offene Punkte, Fragen | ja | ja | nein |
 | **Nacherfassen**: Notizen anhängen, *Fand nicht statt*, überspringen | ja | ja | nein |
 | **Nachbereiten**: am Desktop sofort (im Hintergrund, mit Ergebnis und *Rückgängig*); am Handy *Speichern und vormerken* – der Desktop bereitet beim nächsten Lauf der Automatik nach | vormerken | ja | ja |
-| **Fragen an den Vault** (Chat): Antworten nur aus dem Vault, mit Quellen; Skills als Knöpfe; **Bilder** (Themenbaum, Verlauf, Beteiligte, Reihen) zeichnet der Code als Mermaid | ja | ja | ja (Bilder nein) |
+| **Fragen an den Vault** (Chat): Antworten nur aus dem Vault, mit Quellen; Skills als Knöpfe; **Bilder** (Themenbaum, Verlauf, Beteiligte, Reihen, Kontexte aus dem Domain Atlas mit den Systemen dahinter) zeichnet der Code als Mermaid – ein Klick auf einen Kasten öffnet seine Notiz | ja | ja | ja (Bilder nein) |
+| **Anleitung**: eingebaut (`anleitung.md`, steckt in main.js), eigene Ansicht | ja | ja | nein |
 | **Offene Fragen** (Kanon, Systemübersicht) im Chat – der einzige Chat-Teil, der die Engine braucht | – | ja | nein |
 | **Thema zuordnen**, **Mit wem?**, Liste *Ohne Thema* | – | ja | nein |
 | **Automatik**: `2ndbrain auto` alle N Minuten | – | ja | teils |

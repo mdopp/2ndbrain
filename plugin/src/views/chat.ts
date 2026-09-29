@@ -8,7 +8,7 @@ export const VIEW_TYPE_CHAT = "2ndbrain-chat";
 /** Rezept aus `.2ndbrain/chat-skills` (gelesen in core/rezepte.ts). */
 export interface ChatSkill { name: string; label: string; beschreibung: string; ziel: string; quelle: string }
 
-interface Bezug { themen: string[]; personen: string[]; termin: string | null; anzeige: string[];
+interface Bezug { themen: string[]; personen: string[]; termin: string | null; anzeige: string[]; atlas?: string[];
                   /** "aus der Frage" | "aus der offenen Notiz" | "aus der vorigen Antwort" */
                   herkunft?: string }
 

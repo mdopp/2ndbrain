@@ -56,7 +56,9 @@ GRUPPEN = [
         ("glossar", "glossar", [], "Glossar: zaehlen, Kanon, Messwerte, Einordnung durch das Modell\n"
                                     "(Bericht; --apply schreibt; --no-llm | --limit N | --min-count N)"),
         ("begriffe", "begriffsindex", [], "Begriffs-Index bauen; --find \"<text>\" zeigt Begriffe und Themen-Kandidaten"),
-        ("kontexte", "kontexte", [], "entities/contexts/_index.md aus dem Kanon"),
+        ("kontexte", "kontexte", [], "entities/contexts/_index.md aus dem Kanon (Kontexte, Subdomaenen, Nachrichten)"),
+        ("kontext-systeme", "kontext_systeme", [], "welches System welchen Kontext umsetzt: Haken aus\n"
+                                                    "reports/kontext-systeme.md uebernehmen, Liste neu (--dry-run | --json)"),
         ("aufloesen", "aufloesen", [], "\"<begriff>\" aufloesen: Kanon, Systemuebersicht, Vault (--json | --kind system)"),
         ("systemuebersicht", "systemuebersicht", [], "LikeC4-Modell und reports/systemuebersicht.md aus den System-Seiten"),
         ("kanon-vorschlaege", "kanon_vorschlaege", [], "Fragen an Kanon und Systemuebersicht (--review: Angekreuztes uebernehmen)"),

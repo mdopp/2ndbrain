@@ -37,9 +37,14 @@ def load_clarifications() -> str:
     if CLARIFICATION_FILE.exists():
         return CLARIFICATION_FILE.read_text(encoding="utf-8")
     return (
-        "# ❓ Offene Klaerungen & Rueckfragen an den Benutzer\n\n"
-        "> Hier sammeln sich automatisch Unklarheiten aus Meetings und Notizen,\n"
-        "> bei denen das System nicht raten wollte, sondern deine Bestaetigung braucht.\n\n"
+        "# Rückfragen\n\n"
+        "Fragen, die die Engine nicht selbst entscheiden darf – meist: welche Person gemeint ist.\n\n"
+        "**So antwortest du:** bei der passenden Option den Haken setzen. Die Automatik arbeitet die Karte "
+        "beim nächsten Lauf ein: Sie trägt die Person in die vorhandenen Aufgaben ein, führt eine "
+        "Vornamen-Datei mit der Person zusammen – oder legt die Person an, wenn du den vollen Namen als "
+        "eigene Option darunterschreibst (z. B. `- [x] Otto Kranich`). Erledigte Karten wandern nach "
+        "`archive/clarifications/`.\n\n"
+        "Sofort statt beim nächsten Lauf: `2ndbrain rueckfragen abhaken`\n\n"
         "---\n\n"
     )
 

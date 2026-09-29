@@ -125,8 +125,9 @@ def fetch_ics(url=None):
             path = vp.VAULT / path                             # relativ zum Vault
         return path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
-        print(f"ERROR fetching calendar: {type(e).__name__}: "
-              f"{re.sub(r'(https?|webcal)://[^\s]+', '<Adresse>', str(e))}", file=sys.stderr)
+        # die Adresse ist ein Zugangsschluessel - nie in eine Meldung
+        ohne_adresse = re.sub(r"(https?|webcal)://[^\s]+", "<Adresse>", str(e))
+        print(f"ERROR fetching calendar: {type(e).__name__}: {ohne_adresse}", file=sys.stderr)
         sys.exit(1)
 
 

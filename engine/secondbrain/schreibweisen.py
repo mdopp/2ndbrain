@@ -173,10 +173,6 @@ def entscheidung(variante: str, name: str, kat: str) -> tuple[str, str]:
     return (wahl, "E-Mail-Adresse") if wahl else ("", "")
 
 
-def umlaut_richtig(variante: str, name: str) -> bool:
-    return umlaut_wahl(variante, name) == "B"
-
-
 def _liste(v) -> list[str]:
     if isinstance(v, str):
         v = [v]

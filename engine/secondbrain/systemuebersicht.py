@@ -326,8 +326,9 @@ def build_c4(systems: dict, topics: dict, rels: dict, day: str) -> str:
     lines.append("  // Belegt aus den Themen-Logs (Richtung offen)")
     for (a, b), e in sorted(rels.items()):
         belege = " | ".join(f"{d} {t}: {txt}" for d, t, txt, _src in e["belege"])
+        titel = f"gemeinsam genannt ({e['n']}×)"
         lines.append(f"  {_fqn(a, systems, topics)} -[belegt]-> {_fqn(b, systems, topics)} "
-                     f"{_q(f'gemeinsam genannt ({e['n']}×)')} {{ description {_q(belege)} }}")
+                     f"{_q(titel)} {{ description {_q(belege)} }}")
     lines.append("}")
     # Sichten klein halten: alles verschachtelt in einer Sicht scheitert bei vielen Kaesten am
     # Layout von likec4 ("Fail layout view index"). Deshalb: Landschaft mit zwei Ebenen, je

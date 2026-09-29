@@ -488,6 +488,27 @@ def t_briefing_source_link_date_is_no_deadline():
     ok(not risk["overdue"], "Risiko faelschlich ueberfaellig")
 
 
+def t_briefing_shortens_at_word_and_link_boundaries():
+    """Gekuerzt wird an einer Wortgrenze und nie mitten in einem [[Link]]: ein harter Schnitt machte
+    aus "(Otto, Rita)" ein "(Ott" und aus der Quelle einen kaputten Link "(→ [[2…", der die Tabelle
+    der Vorbereitung zerlegt."""
+    import briefing as bf
+    lang = ("Vier Jahresziel-Workshops mit den Teams werden durchgefuehrt und ausgewertet. "
+            "(Otto, Rita, 2026-09-21)")
+    _o, label, _c = bf._split_item(lang)
+    ok(label.endswith("…") and "(Ott" not in label and len(label) <= 70, f"Label: {label!r}")
+    ok(label.startswith("Vier Jahresziel-Workshops"), label)
+    q = bf.default_question({"kind": "decision", "label": label, "owners": [], "stale": False})
+    ok("„Vier Jahresziel-Workshops" in q and "(Ott" not in q, q)
+    zelle = bf._cell("Zielbild fehlt; Prioritaet mit Otto klaeren (→ [[2026-09-02---runde---zahlungsabgleich]])", 60)
+    ok("[[" not in zelle and zelle.endswith("…"), f"angeschnittener Link: {zelle!r}")
+    eq(bf._cell("kurz | knapp", 60), "kurz \\| knapp")
+    ganz = bf._cell("Quelle (→ [[2026-09-02---runde]]) und noch sehr viel mehr Text danach, bis es zu lang ist", 60)
+    ok("[[2026-09-02---runde]]" in ganz, f"ganzer Link verloren: {ganz!r}")
+    nur_link = bf.kuerzen("[[2026-09-11-ein-sehr-langer-link-auf-eine-quelle|Ergebnisse der Runde]] mit Zusatz", 25)
+    ok("[[" not in nur_link and nur_link.startswith("Ergebnisse"), nur_link)
+
+
 def t_briefing_project_topics_use_tasks_vault_wide_once():
     """Projekt-Themen kommen aus aufgaben.py: auch Punkte aus Meeting-Notizen
     anderer Reihen und aus `## Offene Punkte`; erledigte bleiben draussen; ein Punkt
@@ -676,6 +697,119 @@ def t_contexts_index_is_readonly_reference_list():
     ok("Nicht von Hand editieren" in content, "Read-only-Hinweis fehlt")
     ok("ctx-test" in content and "Test-Kontext" in content, "Kontext fehlt in der Tabelle")
     ok("count: 1" in content, "count-Feld fehlt/falsch")
+
+
+def t_kanon_nachrichten_und_landkarte():
+    """Nachrichten aus dem Domain Atlas kommen vollstaendig an: Typ, Reife, und Empfaenger in der Form
+    `{node: …, lifecycle: …}` als ID mit eigener Reife - frueher wurde daraus der Text "{'node': …}".
+    Das Kontext-Verzeichnis fuehrt Subdomaenen und Nachrichten fuer das Plugin (Bild im Chat)."""
+    d = temp_vault()
+    try:
+        canon = d / "domain-atlas" / "canon"
+        for sub, name, body in (
+                ("subdomains", "sd-lagerhof", "id: sd-lagerhof\nname: Lagerhof\n"),
+                ("subdomains", "sd-auftragswesen", "id: sd-auftragswesen\nname: Auftragswesen\n"),
+                ("contexts", "ctx-wareneingang", "id: ctx-wareneingang\nname: Wareneingang\nprimarySubdomain: sd-lagerhof\n"),
+                ("contexts", "ctx-verladung", "id: ctx-verladung\nname: Verladung\nprimarySubdomain: sd-lagerhof\n"),
+                ("contexts", "ctx-auftragsannahme", "id: ctx-auftragsannahme\nname: Auftragsannahme\n"
+                                                    "primarySubdomain: sd-auftragswesen\nowner: [team-auftrag]\n"),
+                ("messages", "msg-sendung-suchen", "id: msg-sendung-suchen\nname: finde \"Sendung\" nach Nummer\n"
+                 "type: query\nproducers: [ctx-wareneingang, ctx-verladung]\nconsumers: [ctx-auftragsannahme]\n"
+                 "status:\n  lifecycle: review\n"),
+                ("messages", "msg-palette-gebildet", "id: msg-palette-gebildet\nname: Palette gebildet\ntype: event\n"
+                 "producers:\n  - ctx-verladung\nconsumers:\n  - ctx-auftragsannahme\n"
+                 "  - node: ctx-wareneingang\n    lifecycle: proposed\nstatus:\n  lifecycle: agreed\n")):
+            (canon / sub).mkdir(parents=True, exist_ok=True)
+            (canon / sub / f"{name}.yaml").write_text(body, encoding="utf-8", newline="\n")
+        import kanon
+        import kontexte as ci
+        import kanon_vorschlaege as kv
+        for m in (kanon, ci, kv):
+            importlib.reload(m)
+        k = kanon.lade()
+        pal = next(m for m in k["nachrichten"] if m["id"] == "msg-palette-gebildet")
+        eq((pal["typ"], pal["reife"], pal["produzenten"], pal["konsumenten"], pal["kanten_reife"]),
+           ("event", "agreed", ["ctx-verladung"], ["ctx-auftragsannahme", "ctx-wareneingang"],
+            {"ctx-wareneingang": "proposed"}))
+        linked = kv.load_canon()["linked"]
+        ok(("ctx-verladung", "ctx-wareneingang") in linked and not any("{" in a + b for a, b in linked), linked)
+        text = ci.build_content(ci.load_contexts(), *ci.load_landkarte())
+        ok("| `sd-lagerhof` | Lagerhof | 2 |" in text and "## Kontexte" in text, text)
+        ok("| `msg-palette-gebildet` Palette gebildet | event | agreed | `ctx-verladung` "
+           "| `ctx-auftragsannahme`, `ctx-wareneingang` (proposed) |" in text, text)
+        ok("| `msg-sendung-suchen` finde \"Sendung\" nach Nummer | query | review "
+           "| `ctx-wareneingang`, `ctx-verladung` | `ctx-auftragsannahme` |" in text, text)
+    finally:
+        restore_vault()
+
+
+def t_kontext_systeme_vorschlaege_und_haken():
+    """Welches System setzt welchen Kontext um: Vorschlaege nur mit Beleg (Name, Daten laut
+    Migrationstabellen, Team); Haken setzen ordnet zu (`atlas_kontexte:` auf der System-Seite), Haken
+    weg nimmt die Zuordnung zurueck, eine eigene Zeile ordnet ein System ohne Vorschlag zu."""
+    d = temp_vault()
+    try:
+        canon = d / "domain-atlas" / "canon"
+        for sub, name, body in (
+                ("subdomains", "sd-lagerhof", "id: sd-lagerhof\nname: Lagerhof\n"),
+                ("teams", "team-halle", "id: team-halle\nname: Halle\n"),
+                ("contexts", "ctx-verladung", "id: ctx-verladung\nname: Verladung\nprimarySubdomain: sd-lagerhof\n"
+                                              "owner: [team-halle]\n"),
+                ("contexts", "ctx-rampenplaner", "id: ctx-rampenplaner\nname: Rampenplaner\nprimarySubdomain: sd-lagerhof\n"),
+                ("contexts", "ctx-wareneingang", "id: ctx-wareneingang\nname: Wareneingang\nprimarySubdomain: sd-lagerhof\n"),
+                ("object-refs", "obj-palette", "id: obj-palette\nconcept: Palette\ncontext: ctx-verladung\n"),
+                ("migration-tables", "mt-alt-pal", "id: mt-alt-pal\nsourceSystem: Altlager\nsourceId: PAL\n"
+                 "migratingToObjectRef: obj-palette\ndescription: 'Eigentümer: Altlager → geplant: Hallenfunk'\n")):
+            (canon / sub).mkdir(parents=True, exist_ok=True)
+            (canon / sub / f"{name}.yaml").write_text(body, encoding="utf-8", newline="\n")
+        S = d / "entities" / "systems"
+        (S / "altlager.md").write_text("---\ntype: system\nname: Altlager\n---\n", encoding="utf-8", newline="\n")
+        (S / "rampenplaner.md").write_text("---\ntype: system\nname: Rampenplaner\n---\n", encoding="utf-8", newline="\n")
+        (S / "funkbox.md").write_text("---\ntype: system\nname: Funkbox\nowner_team: '[[halle-team]]'\n---\n",
+                                      encoding="utf-8", newline="\n")
+        (S / "scanner.md").write_text("---\ntype: system\nname: Scanner\n---\n", encoding="utf-8", newline="\n")
+        (d / "entities" / "teams" / "halle-team.md").write_text("---\ntype: team\nname: Halle\n---\n",
+                                                                encoding="utf-8", newline="\n")
+        import kanon
+        import kontext_systeme as ks
+        for m in (kanon, ks):
+            importlib.reload(m)
+        v = ks.vorschlaege()
+        by = {c["id"]: {x["system"]: x["gruende"] for x in c["vorschlaege"]} for c in v["kontexte"]}
+        eq(by["ctx-verladung"], {"altlager": ["Daten heute in Altlager (1 Tabelle)"], "funkbox": ["Team [[halle-team]]"]})
+        eq(by["ctx-rampenplaner"], {"rampenplaner": ["Name"]})
+        eq(by["ctx-wareneingang"], {}, "ohne Beleg kein Vorschlag:")
+        r = ks.automatik()
+        text = ks.BERICHT.read_text(encoding="utf-8")
+        ok("## Lagerhof `sd-lagerhof`" in text and "### Verladung `ctx-verladung`" in text, text)
+        ok("- [ ] [[altlager|Altlager]] – Daten heute in Altlager (1 Tabelle) <!-- ks:ctx-verladung:altlager:0 -->" in text, text)
+        ok("Wareneingang `ctx-wareneingang`" in text.split("## Ohne Vorschlag")[1], "Ohne Vorschlag fehlt")
+        ok(r["changed"] and not (S / "altlager.md").read_text(encoding="utf-8").count("atlas_kontexte"),
+           "nichts zugeordnet ohne Haken")
+        # Haken setzen + eigene Zeile fuer einen Kontext ohne Vorschlag
+        text = text.replace("- [ ] [[altlager|Altlager]]", "- [x] [[altlager|Altlager]]")
+        text = text.replace("## Ohne Vorschlag", "### Wareneingang `ctx-wareneingang`\n- [x] [[scanner]]\n\n## Ohne Vorschlag")
+        ks.BERICHT.write_text(text, encoding="utf-8", newline="\n")
+        r = ks.automatik()
+        eq(vp_fm(S / "altlager.md").get("atlas_kontexte"), ["ctx-verladung"])
+        eq(vp_fm(S / "scanner.md").get("atlas_kontexte"), ["ctx-wareneingang"])
+        ok("2 Zuordnung(en) übernommen" in " ".join(r["detail"]), r)
+        text = ks.BERICHT.read_text(encoding="utf-8")
+        ok("- [x] [[altlager|Altlager]]" in text and "<!-- ks:ctx-verladung:altlager:1 -->" in text, text)
+        ok("- [x] [[scanner|Scanner]] – von Hand" in text, text)
+        # Haken weg: Zuordnung zurueck, das Feld verschwindet
+        ks.BERICHT.write_text(text.replace("- [x] [[altlager|Altlager]]", "- [ ] [[altlager|Altlager]]"),
+                              encoding="utf-8", newline="\n")
+        ks.automatik()
+        ok("atlas_kontexte" not in (S / "altlager.md").read_text(encoding="utf-8"), "Zuordnung nicht entfernt")
+        eq(vp_fm(S / "scanner.md").get("atlas_kontexte"), ["ctx-wareneingang"], "andere Zuordnung bleibt:")
+    finally:
+        restore_vault()
+
+
+def vp_fm(p):
+    import vault_paths as vp
+    return vp.read_frontmatter(p)
 
 
 # ─────────────────────────────────────────── aufloesen
@@ -5891,6 +6025,10 @@ TESTS = [
     ("Glossar erkennt ueberdeckten Personen-Begriff", t_glossary_finds_shadowed_person_term),
     ("Glossar erkennt Ueberdeckung ueber Dateinamen-Fallback", t_glossary_finds_shadowed_term_via_filename_fallback),
     ("Contexts-Index ist read-only Verweisliste", t_contexts_index_is_readonly_reference_list),
+    ("Kanon: Nachrichten vollstaendig (Typ, Reife, {node}), Landkarte im Kontext-Verzeichnis",
+     t_kanon_nachrichten_und_landkarte),
+    ("Kontexte und Systeme: Vorschlaege mit Beleg, Haken ordnen zu und nehmen zurueck",
+     t_kontext_systeme_vorschlaege_und_haken),
     ("Personen-Auflosung inkl. Mehrdeutigkeit", t_person_resolution),
     ("Klaerungs-IDs eindeutig auch innerhalb derselben Sekunde", t_clarification_ids_unique_within_same_second),
     ("Klaerungs-Vorabpruefung bricht die Schleife", t_clarify_preflight_blocks_loop),
@@ -5973,6 +6111,7 @@ TESTS = [
      t_health_counts_overdue_tasks_vault_wide_with_reasons),
     ("Briefing: altes Risiko nur INFO, nicht kritisch", t_briefing_stale_risk_is_info_not_critical),
     ("Briefing: Datum im Quellen-Link ist keine Frist", t_briefing_source_link_date_is_no_deadline),
+    ("Briefing: kuerzen an Wort- und Link-Grenzen", t_briefing_shortens_at_word_and_link_boundaries),
     ("Personen-Ueberblick: nur voller Name, idempotent", t_people_profile_full_name_only_and_idempotent),
     ("Uebernehmen: person_facts mit Rolle, ohne Vornamen, ohne Dublette", t_sync_person_facts_appends_role_and_dedupes),
     ("Ausgabe pruefen: neue Person nur mit Vorname wird verworfen", t_validate_drops_first_name_new_person),

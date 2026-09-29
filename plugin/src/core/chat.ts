@@ -2,7 +2,8 @@
 // Ausschnitt aus vorhandenen Ergebnissen (Stand-Block, Ampel, offene Punkte, Log, Beteiligte), das
 // lokale Modell formuliert nur daraus. Nur "Offene Fragen" rechnet die Engine (`2ndbrain frage`).
 
-import { chatPicture, isPicture, pictureWish } from "./chatBilder";
+import { chatPicture, isAtlasQuestion, isPicture, pictureWish } from "./chatBilder";
+import { Atlas, loadAtlas, matchAtlas, norm } from "./atlas";
 import { addDays, weekday } from "./datum";
 import { Names, Project, aliasMap, asList, listSorted, loadProjects } from "./entities";
 import { logEntries, newestFirst } from "./themenlog";
@@ -64,9 +65,10 @@ export class World {
 
   private constructor(readonly src: VaultSource, readonly today: string, readonly me: string,
                       readonly projects: Map<string, ChatProject>, readonly aliases: Map<string, string>,
-                      readonly people: Set<string>, readonly names: Names) {}
+                      readonly people: Set<string>, readonly names: Names, readonly vault: string) {}
 
-  static async load(src: VaultSource, today: string, me: string): Promise<World> {
+  /** `vault`: Name des Vaults fuer obsidian://-Adressen in Bildern ("" = ohne). */
+  static async load(src: VaultSource, today: string, me: string, vault = ""): Promise<World> {
     const projects = new Map<string, ChatProject>();
     for (const [slug, p] of loadProjects(src)) {
       projects.set(slug, {
@@ -78,7 +80,7 @@ export class World {
       });
     }
     const people = new Set(src.list(DIRS.people, false).map(stem));
-    const w = new World(src, today, me, projects, aliasMap(src), people, new Names(src));
+    const w = new World(src, today, me, projects, aliasMap(src), people, new Names(src), vault);
     w.tasks = (await scanTasks(src)).filter(isOpen);
     return w;
   }
@@ -104,7 +106,8 @@ export class World {
 
 // ------------------------------------------------------------------ Bezug
 
-export interface Scope { themen?: string[]; personen?: string[]; termin?: string | null }
+/** `atlas`: Subdomaenen und Kontexte des Domain Atlas, die die Frage nennt (IDs). */
+export interface Scope { themen?: string[]; personen?: string[]; termin?: string | null; atlas?: string[] }
 
 /** Bezug aus der aktiven Notiz: Thema, Person, Termin oder Reihe. */
 export function scopeFromFile(rel: string, w: World): Scope {
@@ -432,6 +435,33 @@ export async function bRisiken(w: World, themen: string[]): Promise<Block> {
   return [parts.join("\n"), used];
 }
 
+/** Atlas: die genannten Subdomaenen/Kontexte und die Nachrichten ueber ihre Grenzen - fuer Fragen nach
+ *  dem Zusammenspiel, die als Text beantwortet werden. */
+export async function bAtlas(ids: string[], w: World): Promise<Block> {
+  const atlas: Atlas | null = await w.memo("atlas", () => loadAtlas(w.src));
+  if (!atlas || !ids.length) return ["", []];
+  const name = (c: string) => atlas.kontexte.get(c)?.name ?? c;
+  const lines = ["## Domain Atlas (Kontext-Verzeichnis)"];
+  const drin = new Set<string>();
+  for (const id of ids) {
+    const sd = atlas.subdomaenen.get(id);
+    const ks = sd ? [...atlas.kontexte.values()].filter((k) => k.sd === id) : atlas.kontexte.has(id) ? [atlas.kontexte.get(id)!] : [];
+    ks.forEach((k) => drin.add(k.id));
+    if (sd) lines.push(`Subdomäne ${sd.name}: Kontexte ${ks.map((k) => k.name).join(", ") || "keine"}`);
+    else if (ks.length) lines.push(`Kontext ${ks[0].name} (Subdomäne ${atlas.subdomaenen.get(ks[0].sd)?.name ?? ks[0].sd})`);
+  }
+  const msgs = atlas.nachrichten.filter((m) => m.reife !== "retired" && [...m.von, ...m.an].some((c) => drin.has(c)));
+  // zuerst, was zwischen den genannten laeuft
+  const zwischen = (m: typeof msgs[number]) => m.von.some((c) => drin.has(c)) && m.an.some((c) => drin.has(c));
+  msgs.sort((a, b) => Number(zwischen(b)) - Number(zwischen(a)));
+  lines.push(msgs.length ? "Nachrichten (Typ, Reife: von → an):" : "Nachrichten: keine.");
+  for (const m of msgs.slice(0, 30)) {
+    lines.push(`- ${m.typ || "Nachricht"} „${m.name}“ (${m.reife || "ohne Reife"}): ${m.von.map(name).join(", ")} → ${m.an.map(name).join(", ")}`);
+  }
+  if (msgs.length > 30) lines.push(`… und ${msgs.length - 30} weitere`);
+  return [lines.join("\n"), []];
+}
+
 // ------------------------------------------------------------------ Ausschnitt
 
 export async function buildContext(frage: string, skill: SkillRecipe | null, scope: Scope, w: World,
@@ -469,7 +499,8 @@ export async function buildContext(frage: string, skill: SkillRecipe | null, sco
         .sort((a, b) => (order[w.projects.get(a)!.health] ?? 2) - (order[w.projects.get(b)!.health] ?? 2) || (a < b ? -1 : a > b ? 1 : 0));
       for (const k of kids.slice(0, 6)) blocks.push(await bThema(k, w, window, true));
     }
-    if (quelle === "auto" && !themen.length && !personen.length) {
+    if ((scope.atlas ?? []).length && isAtlasQuestion(frage)) blocks.unshift(await bAtlas(scope.atlas ?? [], w));
+    if (quelle === "auto" && !themen.length && !personen.length && !(scope.atlas ?? []).length) {
       if (window) blocks.push(await bBewegung(w, window, []));
       blocks.push(bRadar(w));
       if (/offen|nachfass|aufgabe|überfällig|ueberfaellig|warte/.test(frage.toLowerCase())) blocks.push(await bNachfassen(w));
@@ -523,7 +554,9 @@ export interface ChatRequest {
   verlauf?: { rolle: string; text: string }[];
 }
 
-export interface ChatBezug { themen: string[]; personen: string[]; termin: string | null; anzeige: string[]; herkunft: string }
+export interface ChatBezug {
+  themen: string[]; personen: string[]; termin: string | null; atlas: string[]; anzeige: string[]; herkunft: string;
+}
 
 export interface ChatAnswer {
   ok: boolean;
@@ -571,6 +604,8 @@ export interface AskOptions {
   llm: ((messages: ChatMessage[]) => Promise<string>) | null;
   /** Dateinamen (klein, ohne .md) aller Notizen - fuer den Link-Check. */
   files: () => Set<string>;
+  /** Name des Vaults: Kaesten in Bildern tragen damit eine obsidian://-Adresse. */
+  vault?: string;
 }
 
 /** Eine Frage beantworten. Der Frage-Modus "Offene Fragen" (Atlas) laeuft nur in der Engine. */
@@ -580,23 +615,39 @@ export async function ask(req: ChatRequest, opts: AskOptions): Promise<ChatAnswe
   const skill = opts.skills.find((s) => s.name === req.skill) ?? null;
   if (req.skill && !skill) return { ok: false, grund: `Skill '${req.skill}' nicht gefunden (.2ndbrain/chat-skills).` };
   if (skill?.quelle === "fragen") return { ok: false, grund: "„Offene Fragen“ gibt es nur am Desktop – sie schreiben ins Atlas-Repo." };
-  const w = await World.load(opts.src, opts.today, opts.me);
+  const w = await World.load(opts.src, opts.today, opts.me, opts.vault ?? "");
   // Bezug: was die Frage nennt > aktive Notiz > Bezug der vorigen Antwort (Nachfrage)
   const textScope = scopeFromText(frage, w);
+  const atlas = await w.memo("atlas", () => loadAtlas(opts.src));
+  const atlasHits = atlas ? matchAtlas(frage, atlas) : [];
   const fileScope = scopeFromFile(req.ziel?.datei ?? "", w);
   const prev = req.bezug ?? {};
-  const fromText = textScope.themen.length > 0 || textScope.personen.length > 0;
+  // Atlas-Namen machen die Frage nur dann zum Bezug, wenn sie nach Kontexten fragt - sonst verdraengte
+  // ein zufaellig genanntes Wort ("Verladung") die offene Notiz
+  const fromText = textScope.themen.length > 0 || textScope.personen.length > 0
+    || (atlasHits.length > 0 && isAtlasQuestion(frage));
   const fromFile = !fromText && Object.values(fileScope).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
   const src: Scope = fromText ? textScope : fromFile ? fileScope : prev;
-  const scope = { themen: [...(src.themen ?? [])], personen: [...(src.personen ?? [])],
-                  termin: fromText ? null : (src.termin ?? null) };
+  const scope: Scope = { themen: [...(src.themen ?? [])], personen: [...(src.personen ?? [])],
+                         termin: fromText ? null : (src.termin ?? null),
+                         atlas: atlasHits.length ? atlasHits : fromText ? [] : [...(src.atlas ?? [])] };
   const window = timeWindow(frage, opts.today);
-  if (skill?.ziel === "person" && !scope.personen.length) return { ok: false, grund: "Für diesen Skill eine Person nennen oder ihre Notiz öffnen." };
-  if (skill?.ziel === "thema" && !scope.themen.length) return { ok: false, grund: "Für diesen Skill ein Thema nennen oder seine Notiz öffnen." };
-  const prevAny = (prev.themen?.length ?? 0) > 0 || (prev.personen?.length ?? 0) > 0 || !!prev.termin;
+  const themen = scope.themen ?? [];
+  const personen = scope.personen ?? [];
+  const atlasIds = scope.atlas ?? [];
+  if (skill?.ziel === "person" && !personen.length) return { ok: false, grund: "Für diesen Skill eine Person nennen oder ihre Notiz öffnen." };
+  if (skill?.ziel === "thema" && !themen.length) return { ok: false, grund: "Für diesen Skill ein Thema nennen oder seine Notiz öffnen." };
+  if (skill?.ziel === "atlas" && !atlasIds.length) {
+    return { ok: false, grund: "Für dieses Bild eine Subdomäne oder einen Kontext aus dem Atlas nennen (z. B. „Wie spielen A und B zusammen?“)." };
+  }
+  const prevAny = (prev.themen?.length ?? 0) > 0 || (prev.personen?.length ?? 0) > 0 || !!prev.termin
+    || (prev.atlas?.length ?? 0) > 0;
+  const atlasName = (id: string) => atlas?.subdomaenen.get(id)?.name ?? atlas?.kontexte.get(id)?.name ?? id;
   const bezug: ChatBezug = {
-    themen: scope.themen, personen: scope.personen, termin: scope.termin,
-    anzeige: [...scope.themen.map((s) => w.topicName(s)), ...scope.personen.map((p) => w.personName(p))],
+    themen, personen, termin: scope.termin ?? null, atlas: atlasIds,
+    anzeige: [...themen.map((s) => w.topicName(s)), ...personen.map((p) => w.personName(p)),
+              ...atlasIds.filter((id) => !themen.some((t) => norm(w.topicName(t)).startsWith(norm(atlasName(id)))))
+                .map((id) => `${atlasName(id)} (Atlas)`)],
     herkunft: fromText ? "aus der Frage" : fromFile ? "aus der offenen Notiz" : prevAny ? "aus der vorigen Antwort" : "",
   };
   const picture = skill ? (isPicture(skill.quelle) ? skill.quelle : null) : pictureWish(frage, scope);

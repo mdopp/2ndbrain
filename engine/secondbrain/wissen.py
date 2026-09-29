@@ -10,8 +10,11 @@ mit einem aktuellen Begriffs-Index:
   Glossar              Notizen (aktive Termine, Archiv) -> glossar.py. Das Modell ordnet je Lauf
                        hoechstens GLOSSAR_JE_LAUF Begriffe ein (eine Portion - Chat und Nachbereiten
                        warten sonst); ein Rest kommt im naechsten Lauf dran. Ohne Modell wartet es.
+  Kontexte/Systeme     Haken in reports/kontext-systeme.md -> `atlas_kontexte:` der System-Seiten,
+                       Liste neu (kontext_systeme.py)
 
-Die Arbeit selbst machen begriffsindex.py, kontexte.py und glossar.py; hier steht nur, wann.
+Die Arbeit selbst machen begriffsindex.py, kontexte.py, glossar.py und kontext_systeme.py; hier steht
+nur, wann.
 Von Hand gestartet nimmt es dieselbe Sperre wie die Automatik - nie zwei Laeufe am Glossar.
 
     2ndbrain wissen [--force] [--dry-run] [--json]
@@ -83,11 +86,13 @@ def aktualisieren(*, llm_ok: bool, dry_run: bool = False, force: bool = False) -
         else:
             detail.append("Begriffs-Index würde neu gebaut")
         changed += 1
-    # 2. Kontext-Verzeichnis
-    if force or state.get("kontexte") != kanon_sig:
+    # 2. Kontext-Verzeichnis (mit Subdomaenen und Nachrichten; die Fassung im Schluessel zieht ein
+    #    neues Format einmal nach, auch wenn sich der Kanon nicht geaendert hat)
+    kontexte_sig = f"{kanon_sig}|{ci.FASSUNG}"
+    if force or state.get("kontexte") != kontexte_sig:
         contexts = ci.load_contexts()
         if contexts:
-            content = ci.build_content(contexts)
+            content = ci.build_content(contexts, *ci.load_landkarte())
             alt = ci.INDEX_PATH.read_text(encoding="utf-8") if ci.INDEX_PATH.is_file() else ""
             if content != alt:
                 if not dry_run:
@@ -96,7 +101,7 @@ def aktualisieren(*, llm_ok: bool, dry_run: bool = False, force: bool = False) -
                 detail.append(f"Kontext-Verzeichnis neu ({len(contexts)} Kontexte)")
                 changed += 1
         if not dry_run:
-            state["kontexte"] = kanon_sig
+            state["kontexte"] = kontexte_sig
     # 3. Glossar - nach neuen Notizen; ein Rest fuers Modell auch ohne neue Notizen
     notes = _sig([vp.VAULT / "active-meetings", vp.SOURCES_DIR])
     faellig = force or state.get("glossar") != notes or (llm_ok and state.get("glossar_offen"))
@@ -120,6 +125,16 @@ def aktualisieren(*, llm_ok: bool, dry_run: bool = False, force: bool = False) -
                  f"{offen} warten aufs Modell" if offen else ""]
         detail.append("Glossar: " + (", ".join(t for t in teile if t) or "unverändert"))
         changed += bearbeitet
+    # 4. Kontexte und Systeme: angehakte Zuordnungen uebernehmen, Liste nachziehen - wenn sich Kanon,
+    #    System-Seiten oder die Liste (Haken) geaendert haben
+    import kontext_systeme as ks
+    ks_sig = "|".join((kanon_sig, _sig([vp.SYSTEMS_DIR]), _sig([ks.BERICHT])))
+    if force or state.get("kontext_systeme") != ks_sig:
+        r = ks.automatik(dry_run=dry_run)
+        detail += r["detail"]
+        changed += r["changed"]
+        if not dry_run:
+            state["kontext_systeme"] = "|".join((kanon_sig, _sig([vp.SYSTEMS_DIR]), _sig([ks.BERICHT])))
     if not dry_run:
         STATE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
     return {"detail": detail or ["nichts zu tun"], "changed": changed}

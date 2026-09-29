@@ -20,6 +20,7 @@ import { DEFAULT_SETTINGS, SecondBrainSettingTab, SecondBrainSettings, Spiegel }
 import { CAL_CONFIG, Json, LLM_CONFIG, LOCAL_CONFIG, readConfig, updateConfig } from "./konfiguration";
 import { CaptureModal, WrapupResultModal } from "./views/nacherfassen";
 import { ChatState, ChatView, VIEW_TYPE_CHAT, newChatState } from "./views/chat";
+import { AnleitungView, VIEW_TYPE_ANLEITUNG } from "./views/anleitung";
 import { COCKPIT_BLOCK, CockpitBlock } from "./views/cockpit";
 import { PersonPickerModal, PersonSuggestion } from "./views/personen";
 import { TopicPersonSuggest } from "./views/sofortsuche";
@@ -72,8 +73,6 @@ const CAL_SECRET = "2ndbrain-kalender-url";
 // Nur am Desktop - am Handy laeuft keine Engine, dort fuehrt der Sync zusammen.
 const AUTO_LOCK = ".2ndbrain/daten/.auto.lock";
 const AUTO_LOCK_MAX_AGE_MS = 30 * 60_000;
-// Die Anleitung fuer Benutzer (legt `einrichten` aus der Vorlage an, wenn sie fehlt)
-const HELP_NOTE = "README.md";
 
 export default class SecondBrainPlugin extends Plugin {
   settings: SecondBrainSettings = { ...DEFAULT_SETTINGS };
@@ -130,6 +129,7 @@ export default class SecondBrainPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_TODAY, (leaf) => new TodayView(leaf, this));
     this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
+    this.registerView(VIEW_TYPE_ANLEITUNG, (leaf) => new AnleitungView(leaf));
     // Cockpit-Seiten ohne JavaScript in der Notiz: ```2ndbrain aufgaben / risiken
     this.registerMarkdownCodeBlockProcessor(COCKPIT_BLOCK, (source, el, ctx) => {
       ctx.addChild(new CockpitBlock(el, this, source.trim().split(/\s+/)[0] ?? "", ctx.sourcePath));
@@ -159,6 +159,8 @@ export default class SecondBrainPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => void this.refreshLlm(), 5 * 60_000));
     // Obsidian schliesst: den Explorer mitnehmen (onunload kommt dann nicht immer)
     if (this.desktop) this.registerDomEvent(window, "beforeunload", () => this.desktop?.likec4.stop());
+    // Kaesten in Bildern oeffnen ihre Notiz (Pfad im Hinweistext)
+    this.registerDomEvent(document, "click", (evt) => this.openDiagramNode(evt), { capture: true });
   }
 
   onunload(): void {
@@ -361,7 +363,21 @@ export default class SecondBrainPlugin extends Plugin {
       skills: await this.chatSkills(),
       llm: async (messages) => stripThink(await complete(this.httpPost, this.llm, messages, { maxTokens: 900, temperature: 0.2 })),
       files: () => new Set(this.app.vault.getMarkdownFiles().map((f) => f.basename.toLowerCase())),
+      vault: this.app.vault.getName(),
     });
+  }
+
+  /** Klick auf einen Kasten in einem Bild (Mermaid): der Hinweistext traegt den Pfad der Notiz
+   *  (core/chatBilder.ts `klick`). Obsidians Mermaid entfernt obsidian://-Adressen, deshalb oeffnet
+   *  das Plugin die Notiz selbst - im Chat wie in jeder Notiz, am Desktop wie am Handy. */
+  private openDiagramNode(evt: MouseEvent): void {
+    const target = evt.target as Element | null;
+    const node = target?.closest?.(".mermaid .clickable[title]");
+    const path = node?.getAttribute("title") ?? "";
+    if (!path.endsWith(".md") || !(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    void this.app.workspace.openLinkText(path, "", evt.ctrlKey || evt.metaKey);
   }
 
   /** POST ueber Obsidians requestUrl (kein CORS, auch am Handy) - mit eigenem Zeitlimit. */
@@ -916,14 +932,11 @@ export default class SecondBrainPlugin extends Plugin {
     new TopicPersonSuggest(this.app, this).open();
   }
 
-  /** Die Anleitung (README.md im Vault-Ordner); fehlt sie, sagen, wie sie entsteht. */
+  /** Die Anleitung - eingebaut ins Plugin (views/anleitung.ts), als eigener Tab. */
   async openHelp(): Promise<void> {
-    const file = this.app.vault.getAbstractFileByPath(HELP_NOTE);
-    if (!(file instanceof TFile)) {
-      new Notice(`2ndBrain: ${HELP_NOTE} fehlt im Vault – am Desktop legt „Einstellungen → Engine → Einrichten“ sie an.`);
-      return;
-    }
-    await this.app.workspace.getLeaf(false).openFile(file);
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_ANLEITUNG)[0] ?? this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: VIEW_TYPE_ANLEITUNG, active: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   async activateToday(): Promise<void> {

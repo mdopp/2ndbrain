@@ -27,7 +27,6 @@ Konfiguration überschreiben.
 """
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -184,7 +183,22 @@ def strip_prefix(eid: str, art: str | None = None, fmt: str | None = None) -> st
 
 
 def _list(v) -> list:
-    return [v] if isinstance(v, str) else list(v or [])
+    return [v] if isinstance(v, (str, dict)) else list(v or [])
+
+
+def _knoten(v) -> str:
+    """Ein Eintrag unter producers/consumers: die ID - auch in der Form `{node: ctx-…, lifecycle: …}`."""
+    if isinstance(v, dict):
+        return str(v.get("node") or v.get("id") or "").strip()
+    return str(v or "").strip()
+
+
+def _reife(v) -> str:
+    """Reifegrad (`lifecycle`) aus `status: {lifecycle: …}` oder einem Kanten-Eintrag; "" ohne Angabe."""
+    if isinstance(v, dict):
+        inner = v.get("status") if isinstance(v.get("status"), dict) else v
+        return str(inner.get("lifecycle") or "").strip()
+    return ""
 
 
 # ------------------------------------------------------------------ Adapter
@@ -225,8 +239,16 @@ def _domain_atlas(root: Path | None) -> dict | None:
                   for q, d in raw["teams"]]
     k["externe"] = [{"id": d.get("id"), "name": d.get("name"), "kategorie": d.get("category") or "",
                      "aliases": _list(d.get("aliases")), "quelle": q} for q, d in raw["externe"]]
-    k["nachrichten"] = [{"id": d.get("id"), "name": d.get("name"), "produzenten": [str(x) for x in _list(d.get("producers"))],
-                         "konsumenten": [str(x) for x in _list(d.get("consumers"))], "aliases": [], "quelle": q}
+    k["nachrichten"] = [{"id": d.get("id"), "name": d.get("name"), "typ": str(d.get("type") or ""),
+                         "reife": _reife(d.get("status")),
+                         "beschreibung": str(d.get("description") or ""),
+                         "produzenten": [_knoten(x) for x in _list(d.get("producers")) if _knoten(x)],
+                         "konsumenten": [_knoten(x) for x in _list(d.get("consumers")) if _knoten(x)],
+                         # eigene Reife einzelner Kanten (`{node, lifecycle}`), sonst gilt die der Nachricht
+                         "kanten_reife": {_knoten(x): _reife(x) for x in
+                                          _list(d.get("producers")) + _list(d.get("consumers"))
+                                          if isinstance(x, dict) and _knoten(x) and _reife(x)},
+                         "aliases": [], "quelle": q}
                         for q, d in raw["nachrichten"]]
     k["beziehungen"] = [{"id": d.get("id"), "von": str(d.get("from")), "zu": str(d.get("to")), "typ": d.get("type") or "",
                          "name": d.get("name"), "aliases": [], "quelle": q} for q, d in raw["beziehungen"]]
@@ -279,8 +301,11 @@ def _einfach(path: Path | None) -> dict | None:
                   for x in items("teams")]
     k["externe"] = [{"id": eid(x), "name": x.get("name") or eid(x), "kategorie": str(x.get("kategorie") or ""),
                      "aliases": al(x, "aliases"), "quelle": q} for x in items("externe")]
-    k["nachrichten"] = [{"id": eid(x), "name": x.get("name"), "produzenten": [str(v) for v in _list(x.get("von"))],
-                         "konsumenten": [str(v) for v in _list(x.get("an"))], "aliases": [], "quelle": q}
+    k["nachrichten"] = [{"id": eid(x), "name": x.get("name"), "typ": str(x.get("typ") or x.get("type") or ""),
+                         "reife": str(x.get("reife") or ""), "beschreibung": str(x.get("beschreibung") or ""),
+                         "produzenten": [_knoten(v) for v in _list(x.get("von")) if _knoten(v)],
+                         "konsumenten": [_knoten(v) for v in _list(x.get("an")) if _knoten(v)],
+                         "kanten_reife": {}, "aliases": [], "quelle": q}
                         for x in items("nachrichten")]
     k["beziehungen"] = [{"id": str(x.get("id") or f"{x.get('von')}-{x.get('zu')}"), "von": str(x.get("von")),
                          "zu": str(x.get("zu")), "typ": str(x.get("typ") or ""), "name": x.get("name"),

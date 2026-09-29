@@ -7,7 +7,8 @@ Ein Skill besteht aus:
 - `quelle` – welcher Baustein den Ausschnitt liefert. Die Bausteine (im Plugin `src/core/chat.ts`)
   **lesen nur**, was die vorhandenen Skripte schon berechnet haben – hier entsteht
   keine neue Auswertung.
-- `ziel` – welcher Bezug nötig ist (`thema`, `person`, `termin` oder `keins`).
+- `ziel` – welcher Bezug nötig ist (`thema`, `person`, `termin`, `atlas` – eine Subdomäne oder ein
+  Kontext des Domain Atlas – oder `keins`).
   Der Bezug kommt aus der Frage oder aus der aktiven Notiz.
 - Rumpf – die Antwortform. Den darfst du frei ändern.
 
@@ -23,11 +24,14 @@ Ein Skill besteht aus:
 | Bild: Verlauf | bild-verlauf | Event Log des Themas (+ Beschlüsse/Risiken der Unterthemen) als Zeitstrahl |
 | Bild: Beteiligte | bild-beteiligte | `beteiligte` (`beteiligte.py`) + offene Punkte (`aufgaben.py`) |
 | Bild: Reihen | bild-reihen | Kalender + Zuordnungsregeln (`themen.py`) der nächsten 30 Tage |
-| Offene Fragen | fragen | Fragen an Domain Atlas und Systemübersicht (`atlas_vorschlaege.py`) – nur am Desktop, kein Modell |
+| Bild: Kontexte | bild-kontexte | Kontext-Verzeichnis mit den Nachrichten des Atlas (`kontexte.py`) + System-Seiten mit `atlas_kontexte:` |
+| Offene Fragen | fragen | Fragen an Domain Atlas und Systemübersicht (`kanon_vorschlaege.py`) – nur am Desktop, kein Modell |
 
 Bild-Skills antworten ohne Modell in etwa einer Sekunde mit einem ` ```mermaid `-Block,
-den Obsidian im Chat zeichnet. Eine freie Bitte („Zeichne das Kundenportal mit Unterthemen“)
-landet beim passenden Bild-Skill; alles andere zeichnet das Modell.
+den Obsidian im Chat zeichnet; ein Klick auf einen Kasten öffnet seine Notiz. Eine freie Bitte
+(„Zeichne das Kundenportal mit Unterthemen“, „Wie spielen die Kontexte A und B zusammen?“)
+landet beim passenden Bild-Skill; alles andere zeichnet das Modell. „Zeig“ oder „mal“ allein ist
+noch kein Bildwunsch („Sag mal, wo steht …?“ bekommt eine Antwort in Worten).
 
 Abgrenzung: Diese Skills beantworten nur Fragen und schreiben nichts. Einsortieren
 und Nachbereiten macht die Engine (Nachbereiten im Plugin, Automatik). Die Priorisierung der Vorbereitung und die Ampel stammen aus den

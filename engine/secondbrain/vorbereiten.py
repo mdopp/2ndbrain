@@ -726,7 +726,7 @@ def build_prep(ev: dict, previous: dict | None, project: dict | None,
         parts = [parts]
     if parts:
         lines += ["", "**Teilnehmer:** " + ", ".join(
-            f"[[{re.sub(r'\[\[|\]\]', '', str(x))}]]" for x in parts)]
+            "[[" + re.sub(r"\[\[|\]\]", "", str(x)) + "]]" for x in parts)]
 
     lines.append("")
     return "\n".join(lines) + "\n"

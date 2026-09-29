@@ -68,12 +68,12 @@ export class SecondBrainSettingTab extends PluginSettingTab {
 
   // --------------------------------------------------------- Anleitung
 
-  /** Ganz oben: die Anleitung (README.md im Vault) - schliesst die Einstellungen und oeffnet sie. */
+  /** Ganz oben: die Anleitung (im Plugin eingebaut) - schliesst die Einstellungen und oeffnet sie. */
   private renderHelp(el: HTMLElement): void {
     new Setting(el)
       .setName("So funktioniert 2ndBrain")
-      .setDesc("Die Anleitung im Vault (README.md): Heute-Ansicht, Weg eines Termins, Protokolle, Rückfragen, "
-        + "Themen und Glossar, Chat – und was hier einzustellen ist.")
+      .setDesc("Die Anleitung (im Plugin, passt immer zur Version): Heute-Ansicht, Weg eines Termins, Protokolle, "
+        + "Rückfragen, Themen und Glossar, Chat – und was hier einzustellen ist.")
       .addButton((b) => b.setButtonText("Anleitung öffnen").setCta().onClick(() => {
         (this.app as unknown as { setting?: { close(): void } }).setting?.close();
         void this.plugin.openHelp();

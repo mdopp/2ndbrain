@@ -164,3 +164,10 @@ details[open] > .sb-summary::before { transform: rotate(90deg); }
 .sb-cockpit .sb-chead { display: flex; align-items: center; gap: 6px; }
 .sb-cockpit .sb-chead p { flex: 1; margin: 4px 0; }
 .sb-cockpit .sb-ctable td { vertical-align: top; }
+
+/* Anleitung (views/anleitung.ts) - lesbar wie eine Notiz, auch am Handy */
+.sb-anleitung { padding: 12px 20px 40px; user-select: text; }
+.sb-anleitung .sb-anleitung-text { max-width: var(--file-line-width, 720px); margin: 0 auto; }
+
+/* Bilder im Chat und in Notizen: Kasten mit Notiz (click in core/chatBilder.ts) */
+.mermaid .clickable[title] { cursor: pointer; }

@@ -772,7 +772,8 @@ def _apply_field(slug: str, value: str) -> str:
     field, _, rest = value.partition(" ")
     rest = rest.strip()
     if field == "bereich":
-        vp.update_frontmatter(path, {"bereich": f"[[{re.sub(r'[\[\]]', '', rest).split('|')[0].strip()}]]"})
+        ziel = re.sub(r"[\[\]]", "", rest).split("|")[0].strip()
+        vp.update_frontmatter(path, {"bereich": f"[[{ziel}]]"})
     elif field == "uebersicht":
         vp.update_frontmatter(path, {"uebersicht": rest.lower() not in ("false", "nein", "0")})
     elif field == "verbindungen":

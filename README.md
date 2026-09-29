@@ -18,7 +18,8 @@ Die Begriffe und wie sie im Code heißen: [KONZEPT §19](docs/KONZEPT.md#19-begr
 | Obsidian-Plugin | `plugin/` | Desktop und Handy | Heute, Aufgaben- und Risiken-Seiten, Sofortsuche, Nacherfassen, Chat |
 | Engine (Python) | `engine/secondbrain/` | Desktop | Automatik: Kalender, Mails, Einarbeiten, Vor- und Nachbereiten, Stand, Glossar; MCP-Server für Claude |
 | Entwickler-Werkzeuge | `engine/tools/` | – | Referenzlauf, Entdrahtung, Plugin- und Prompt-Vergleich (nur im Code-Repo) |
-| Vorlagen | `engine/secondbrain/vorlage/` | – | was ein neuer Vault braucht: Cockpit-Seiten, Templates, Playbooks, Chat-Rezepte, Protokoll-Vorlage, die Anleitung für Benutzer |
+| Vorlagen | `engine/secondbrain/vorlage/` | – | was ein neuer Vault braucht: Cockpit-Seiten, Templates, Playbooks, Chat-Rezepte, Protokoll-Vorlage |
+| Anleitung | `plugin/anleitung.md` | Desktop und Handy | die Anleitung für Benutzer – ins Plugin eingebaut, passt immer zur Version |
 | Konzept | `docs/KONZEPT.md` | – | Aufbau, Regeln, Entscheidungen |
 
 Am Handy liest und erfasst man; gerechnet wird am Desktop. Beide Seiten verbinden sich über die Notizen
@@ -38,14 +39,15 @@ selbst – was die Engine schreibt, sieht jedes Gerät.
 2. **2ndBrain** einschalten – am Desktop und am Handy.
 3. Am Desktop: *Einstellungen → 2ndBrain → Engine* → **Installieren** (holt die zur Plugin-Version
    passende Engine über `python -m pip`), dann **Einrichten**: legt fehlende Ordner, Vorlagen,
-   Chat-Rezepte und die Anleitung an (Vorhandenes bleibt), sucht Pfade und zeigt den Befehl für Claude.
+   Chat-Rezepte und Cockpit-Seiten an (Vorhandenes bleibt), sucht Pfade und zeigt den Befehl für Claude.
 4. In den Einstellungen eintragen: Modell-Server und Modell (dazu, wenn gewünscht, ein Prüfmodell für die
    Nachbereitung), dich selbst („Ich“, dein Personen-Slug), den Kalender (iCal-Adresse – sie liegt im
    Obsidian-Schlüsselbund, nicht im Vault).
 
-Wie man damit arbeitet, erklärt die **Anleitung im Vault** (`README.md`, Vorlage:
-[engine/secondbrain/vorlage/README.md](engine/secondbrain/vorlage/README.md)) – in Obsidian über das
-„?“ in *Heute*, oben in den Einstellungen oder den Befehl „Anleitung: so funktioniert 2ndBrain“.
+Wie man damit arbeitet, erklärt die **Anleitung** – sie ist ins Plugin eingebaut
+([plugin/anleitung.md](plugin/anleitung.md)), passt also immer zur Version und braucht keine Datei im
+Vault. In Obsidian über das „?“ in *Heute*, oben in den Einstellungen oder den Befehl „Anleitung: so
+funktioniert 2ndBrain“.
 
 Nur die Engine, ohne Plugin: `python -m pip install <Wheel aus dem Release>`, dann im Vault-Ordner
 `2ndbrain einrichten` (oder `python -m secondbrain einrichten`).

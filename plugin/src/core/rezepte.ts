@@ -9,7 +9,7 @@ export interface SkillRecipe {
   name: string;
   label: string;
   beschreibung: string;
-  ziel: string;          // keins | thema | person
+  ziel: string;          // keins | thema | person | termin | atlas
   quelle: string;        // auto | thema | person | termin | nachfassen | bewegung | risiken | fragen | bild-*
   reihenfolge: number;
   anweisung: string;

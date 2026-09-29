@@ -2,13 +2,14 @@
 // den Daten, nicht das Modell: vollstaendig, exakt, ohne Wartezeit. Obsidian zeichnet den
 // ```mermaid-Block selbst (Desktop und Handy).
 
+import { ATLAS_INDEX, Atlas, AtlasNachricht, atlasPages, loadAtlas } from "./atlas";
 import { loadCalendarEvents } from "./kalender";
 import type { Scope, Window, World } from "./chat";
 import { de, pyLen, pySlice } from "./chat";
 import { addDays } from "./datum";
 import { logEntries, newestFirst } from "./themenlog";
 import { WS, orStr, strip, rstrip } from "./pytext";
-import { DIRS } from "./quelle";
+import { DIRS, stem } from "./quelle";
 import { seriesKey } from "./titel";
 import { forumFm, noteKeys, resolve, slugOf } from "./themen";
 
@@ -19,6 +20,8 @@ const STYLE = [
   "    classDef grau fill:#eeeeee,stroke:#888888,color:#333333",
   "    classDef person fill:#e8eaf6,stroke:#3949ab,color:#1a237e",
   "    classDef reihe fill:#ede7f6,stroke:#5e35b1,color:#311b92",
+  "    classDef kontext fill:#e3f2fd,stroke:#1565c0,color:#0d2c54",
+  "    classDef system fill:#e0f2f1,stroke:#00695c,color:#003d33",
 ];
 const CLS: Record<string, string> = { red: "rot", yellow: "gelb", green: "gruen" };
 const HRANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
@@ -26,7 +29,7 @@ const MARK: Record<string, string> = { DECISION: "✅", RISK: "⚠️", DEADLINE
 const MAX_NODES = 60;
 const MAX_EVENTS = 12;           // Verlauf: senkrecht, in der Seitenleiste noch zu ueberblicken
 const W = "[\\p{L}\\p{N}_]";
-const PICTURES = new Set(["bild-baum", "bild-verlauf", "bild-beteiligte", "bild-reihen"]);
+const PICTURES = new Set(["bild-baum", "bild-verlauf", "bild-beteiligte", "bild-reihen", "bild-kontexte"]);
 
 type Picture = [string, string[]];
 
@@ -37,6 +40,18 @@ export function label(text: string, limit = 42): string {
 }
 
 const mermaid = (lines: string[]) => "```mermaid\n" + lines.join("\n") + "\n```";
+
+/** Kasten anklickbar machen: Obsidians Mermaid (strikter Modus) entfernt obsidian://-Adressen, der
+ *  Hinweistext (`title`) bleibt - darin steht der Pfad, und das Plugin oeffnet die Notiz beim Klick
+ *  (main.ts). Ohne Notiz kein Klick. */
+export function klick(id: string, path: string | undefined, w: World): string[] {
+  if (!path || /["\n]/.test(path) || !w.src.exists(path)) return [];
+  const vault = w.vault ? `vault=${encodeURIComponent(w.vault)}&` : "";
+  return [`    click ${id} "obsidian://open?${vault}file=${encodeURIComponent(path)}" "${path}"`];
+}
+
+const topicPath = (s: string, w: World) => w.projects.get(s)?.path;
+const personPath = (p: string) => `${DIRS.people}/${p}.md`;
 const health = (slug: string, w: World) => w.projects.get(slug)?.health ?? "";
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -89,7 +104,7 @@ async function bildBaum(scope: Scope, w: World): Promise<Picture> {
       used.push(s);
       const extra = [...(openN.get(s) ? [`${openN.get(s)} offen`] : []), ...(folded ? [`+${folded} ${word}`] : [])];
       const text = label(w.topicName(s)) + (extra.length ? "<br/>" + extra.join(" · ") : "");
-      lines.push(`    ${ids.get(s)}["${text}"]:::${CLS[health(s, w)] ?? "grau"}`);
+      lines.push(`    ${ids.get(s)}["${text}"]:::${CLS[health(s, w)] ?? "grau"}`, ...klick(ids.get(s)!, topicPath(s, w), w));
     }
     return ids.get(s)!;
   };
@@ -150,15 +165,25 @@ const MONTHS = "Januar Februar März April Mai Juni Juli August September Oktobe
 
 /** Zeitstrahl eines Themas aus dem Event Log; Beschluesse, Risiken, Fristen und Meilensteine der
  *  Unterthemen kommen mit. */
+/** Notizen nach Dateiname (klein) -> Pfad: Termine und Archiv - fuer Quellen-Links in Bildern. */
+async function notePaths(w: World): Promise<Map<string, string>> {
+  return w.memo("notizpfade", async () => {
+    const m = new Map<string, string>();
+    for (const root of [DIRS.meetings, "archive"]) for (const p of w.src.list(root, true)) m.set(stem(p).toLowerCase(), p);
+    return m;
+  });
+}
+
 async function bildVerlauf(scope: Scope, w: World, window: Window | null): Promise<Picture> {
   const slug = (scope.themen ?? [])[0];
   const [start, lbl] = window ?? [addDays(w.today, -30), "letzte 30 Tage"];
-  let events: [string, string, string, string][] = (await logOf(slug, w)).filter((e) => e[0] >= start)
-    .map(([d, typ, txt]) => [d, typ, txt, ""]);
+  // [Datum, Art, Text, Unterthema (Name), Thema des Eintrags (Slug)]
+  let events: [string, string, string, string, string][] = (await logOf(slug, w)).filter((e) => e[0] >= start)
+    .map(([d, typ, txt]) => [d, typ, txt, "", slug]);
   const kids = [...w.projects.values()].filter((p) => p.parent === slug).map((p) => p.slug);
   for (const k of kids) {
     events = [...events, ...(await logOf(k, w)).filter(([d, typ]) => d >= start && ["DECISION", "RISK", "DEADLINE", "MILESTONE"].includes(typ))
-      .map(([d, typ, txt]): [string, string, string, string] => [d, typ, txt, w.topicName(k)])];
+      .map(([d, typ, txt]): [string, string, string, string, string] => [d, typ, txt, w.topicName(k), k])];
   }
   const total = events.length;
   if (total > MAX_EVENTS) {          // lesbar in der Seitenleiste: Wichtiges zuerst
@@ -174,8 +199,10 @@ async function bildVerlauf(scope: Scope, w: World, window: Window | null): Promi
   }
   const kindCls: Record<string, string> = { DECISION: "gruen", RISK: "rot", DEADLINE: "gelb", MILESTONE: "reihe" };
   const lines = ["flowchart TB"];
+  const clicks: string[] = [];
+  const paths = await notePaths(w);
   let month = "";
-  events.forEach(([d, typ, txt, kid], i) => {
+  events.forEach(([d, typ, txt, kid, topic], i) => {
     const sec = `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
     if (sec !== month) {
       if (month) lines.push("    end");
@@ -184,8 +211,11 @@ async function bildVerlauf(scope: Scope, w: World, window: Window | null): Promi
     }
     const text = label(`${pySlice(de(d), 0, 6)} ${MARK[typ] ?? "•"} ${kid ? kid + ": " : ""}${txt}`, 90);
     lines.push(`        e${i}["${text}"]:::${kindCls[typ] ?? "grau"}`);
+    // Klick: die Quelle des Eintrags (Termin, Mail), sonst das Thema
+    const quelle = /\[\[([^\]|#]+)/.exec(txt)?.[1];
+    clicks.push(...klick(`e${i}`, (quelle && paths.get(strip(quelle).toLowerCase())) || topicPath(topic, w), w));
   });
-  lines.push("    end");
+  lines.push("    end", ...clicks);
   for (let i = 0; i < events.length - 1; i++) lines.push(`    e${i} --> e${i + 1}`);
   const shown = total > events.length ? `${events.length} von ${total} Einträgen, Beschlüsse und Risiken zuerst` : `${total} Einträge`;
   const caption = `**${w.topicName(slug)}** – ${lbl}: ${shown}`
@@ -221,11 +251,11 @@ async function bildBeteiligte(scope: Scope, w: World): Promise<Picture> {
       return [`Für [[${slug}|${w.topicName(slug)}]] ist niemand beteiligt: keine Rolle nennt das Thema, und `
         + "in 90 Tagen gab es keine Aufgaben, Termine oder Log-Nennungen mit Personen.", [slug]];
     }
-    lines.push(`    t0["${label(w.topicName(slug))}"]:::${CLS[health(slug, w)] ?? "grau"}`);
+    lines.push(`    t0["${label(w.topicName(slug))}"]:::${CLS[health(slug, w)] ?? "grau"}`, ...klick("t0", topicPath(slug, w), w));
     persons.forEach((x, i) => {
       const n = openBy.get(`${x}|${slug}`) ?? 0;
       const lbl = label(w.personName(x), 30) + (roles.has(x) ? `<br/>${label(roles.get(x)!, 34)}` : "");
-      lines.push(`    p${i}(["${lbl}"]):::person`);
+      lines.push(`    p${i}(["${lbl}"]):::person`, ...klick(`p${i}`, personPath(x), w));
       lines.push(n ? `    p${i} -->|${n} offen| t0` : roles.has(x) ? `    p${i} ---|Rolle| t0`
         : below.includes(x) && !direct.includes(x) ? `    p${i} -.->|Unterthema| t0` : `    p${i} --- t0`);
     });
@@ -243,10 +273,10 @@ async function bildBeteiligte(scope: Scope, w: World): Promise<Picture> {
     return [`Für [[${person}|${w.personName(person)}]] ist kein Thema berechnet: keine Rolle nennt ein `
       + "Thema, keine offenen Punkte, in 90 Tagen keine Termine oder Log-Nennungen.", [person]];
   }
-  lines.push(`    p0(["${label(w.personName(person), 30)}"]):::person`);
+  lines.push(`    p0(["${label(w.personName(person), 30)}"]):::person`, ...klick("p0", personPath(person), w));
   topics.forEach((s, i) => {
     const n = openBy.get(`${person}|${s}`) ?? 0;
-    lines.push(`    t${i}["${label(w.topicName(s))}"]:::${CLS[health(s, w)] ?? "grau"}`);
+    lines.push(`    t${i}["${label(w.topicName(s))}"]:::${CLS[health(s, w)] ?? "grau"}`, ...klick(`t${i}`, topicPath(s, w), w));
     lines.push(n ? `    p0 -->|${n} offen| t${i}` : byRole.includes(s) ? `    p0 ---|Rolle| t${i}` : `    p0 --- t${i}`);
   });
   const caption = `**${w.personName(person)}**: ${topics.length} Themen – Kante = eigene offene Punkte, „Rolle“ = laut Personenseite`;
@@ -300,19 +330,20 @@ async function bildReihen(scope: Scope, w: World): Promise<Picture> {
     if (focus.size && !topics.some((t) => focus.has(t))) continue;
     if (nodes.size >= MAX_NODES) break;
     const r = `r${i}`;
-    lines.push(`    ${r}(["${label(s.titel, 34)} · ${s.n}×"]):::reihe`);
+    lines.push(`    ${r}(["${label(s.titel, 34)} · ${s.n}×"]):::reihe`, ...klick(r, `${DIRS.forums}/${k}.md`, w));
     for (const t of topics) {
       if (!nodes.has(t)) {
         nodes.set(t, `t${nodes.size}`);
         used.push(t);
-        lines.push(`    ${nodes.get(t)}["${label(w.topicName(t))}"]:::${CLS[health(t, w)] ?? "grau"}`);
+        lines.push(`    ${nodes.get(t)}["${label(w.topicName(t))}"]:::${CLS[health(t, w)] ?? "grau"}`,
+                   ...klick(nodes.get(t)!, topicPath(t, w), w));
       }
       lines.push(`    ${r} --> ${nodes.get(t)}`);
     }
     for (const p of persons) {
       if (!nodes.has(p)) {
         nodes.set(p, `p${nodes.size}`);
-        lines.push(`    ${nodes.get(p)}(["${label(w.personName(p), 30)}"]):::person`);
+        lines.push(`    ${nodes.get(p)}(["${label(w.personName(p), 30)}"]):::person`, ...klick(nodes.get(p)!, personPath(p), w));
       }
       lines.push(`    ${r} --> ${nodes.get(p)}`);
     }
@@ -332,17 +363,235 @@ async function bildReihen(scope: Scope, w: World): Promise<Picture> {
   return [caption + "\n\n" + mermaid([...lines, ...STYLE]), used];
 }
 
+// ------------------------------------------------------------------ Kontexte (Domain Atlas)
+
+const TYP: Record<string, string> = { event: "Event", command: "Command", query: "Query" };
+const ABGESTIMMT = new Set(["agreed", "live"]);
+const MAX_KANTEN = 40;
+
+interface Gruppe { id: string; name: string; kontexte: string[] }
+
+/** Wie Subdomaenen und Kontexte zusammenspielen: die Nachrichten zwischen ihnen aus dem
+ *  Kontext-Verzeichnis (Atlas), darunter die Systeme, die sie umsetzen. Eine Subdomaene allein:
+ *  ihre Kontexte und die Nachrichten ueber ihre Grenze, Partner zusammengefasst je Subdomaene. */
+async function bildKontexte(scope: Scope, w: World): Promise<Picture> {
+  const atlas = await w.memo("atlas", () => loadAtlas(w.src));
+  if (!atlas) {
+    return ["Im Vault fehlt das Kontext-Verzeichnis mit den Nachrichten des Atlas (`entities/contexts/_index.md`) – "
+      + "die Engine schreibt es im Schritt `wissen` der Automatik oder mit `2ndbrain kontexte`.", []];
+  }
+  const ids = (scope.atlas ?? []).filter((i) => atlas.subdomaenen.has(i) || atlas.kontexte.has(i)).slice(0, 3);
+  if (!ids.length) return ["Die Frage nennt keine Subdomäne und keinen Kontext aus dem Atlas.", []];
+  const alleSeiten = await w.memo("atlas-seiten", async () => atlasPages(w.src));
+  // Notiz zu einem Atlas-Eintrag: ein Thema mit dieser atlas_id, sonst das gleichnamige Thema
+  // (Subdomaene "sd-lagerhof" -> Thema "lagerhof", wie begriffsindex.kanon_themen), sonst eine andere Seite
+  const seiten = {
+    get(id: string): string | undefined {
+      const p = alleSeiten.get(id);
+      if (p?.startsWith(`${DIRS.projects}/`)) return p;
+      return topicPath(id.replace(/^(sd|ctx)-/, ""), w) ?? p;
+    },
+  };
+  const gruppen: Gruppe[] = ids.map((id) => atlas.subdomaenen.has(id)
+    ? { id, name: atlas.subdomaenen.get(id)!.name, kontexte: [...atlas.kontexte.values()].filter((k) => k.sd === id).map((k) => k.id) }
+    : { id, name: atlas.kontexte.get(id)!.name, kontexte: [id] });
+  // ein einzeln genannter Kontext gehoert zu seiner eigenen Gruppe, nicht (auch) zur Subdomaene
+  const gruppeVon = new Map<string, number>();
+  gruppen.forEach((g, i) => g.kontexte.forEach((k) => {
+    const alt = gruppeVon.get(k);
+    if (alt === undefined || gruppen[alt].kontexte.length > g.kontexte.length) gruppeVon.set(k, i);
+  }));
+  gruppen.forEach((g, i) => { g.kontexte = g.kontexte.filter((k) => gruppeVon.get(k) === i); });
+  const allein = gruppen.length === 1;
+  const lines = ["flowchart LR"];
+  const clicks: string[] = [];
+  const knoten = new Map<string, string>();         // Kontext-ID -> Mermaid-ID
+  const aussen = new Map<string, string>();         // fremde Subdomaene -> Mermaid-ID (nur allein)
+  const beteiligt = new Set<string>();
+  const kanten: { von: string; an: string; m: AtlasNachricht; reife: string }[] = [];
+  let ruhestand = 0;
+  const knotenFuer = (ctx: string): string | null => {
+    const g = gruppeVon.get(ctx);
+    if (g !== undefined) return knoten.get(ctx) ?? null;
+    if (!allein) return null;
+    const sd = atlas.kontexte.get(ctx)?.sd || "?";
+    if (!aussen.has(sd)) aussen.set(sd, `x${aussen.size}`);
+    return aussen.get(sd)!;
+  };
+  gruppen.forEach((g, gi) => g.kontexte.forEach((k, ki) => knoten.set(k, `k${gi}_${ki}`)));
+  for (const m of atlas.nachrichten) {
+    if (m.reife === "retired") {
+      if (m.von.some((c) => gruppeVon.has(c)) || m.an.some((c) => gruppeVon.has(c))) ruhestand++;
+      continue;
+    }
+    const paare = new Set<string>();
+    for (const p of m.von) {
+      for (const c of m.an) {
+        const [gp, gc] = [gruppeVon.get(p), gruppeVon.get(c)];
+        if (gp === undefined && gc === undefined) continue;
+        if (!allein && (gp === undefined || gc === undefined || gp === gc)) continue;   // nur zwischen den Gruppen
+        const [a, b] = [knotenFuer(p), knotenFuer(c)];
+        if (!a || !b || a === b) continue;
+        // sendet oder empfaengt eine ganze Gruppe (alle ihre Kontexte): eine Kante vom Rahmen
+        const vonAlle = gp !== undefined && gp !== gc && gruppen[gp].kontexte.length > 1
+          && gruppen[gp].kontexte.every((k) => m.von.includes(k));
+        const anAlle = gc !== undefined && gc !== gp && gruppen[gc].kontexte.length > 1
+          && gruppen[gc].kontexte.every((k) => m.an.includes(k));
+        const von = vonAlle ? `g${gp}` : a;
+        const an = anAlle ? `g${gc}` : b;
+        if (gp !== undefined) beteiligt.add(p);
+        if (gc !== undefined) beteiligt.add(c);
+        if (paare.has(`${von}>${an}`)) continue;
+        paare.add(`${von}>${an}`);
+        kanten.push({ von, an, m, reife: m.kantenReife.get(c) || m.kantenReife.get(p) || m.reife });
+      }
+    }
+  }
+  const nachrichten = new Set(kanten.map((k) => k.m.id));
+  const titel = gruppen.map((g) => g.name).join(" ↔ ");
+  const seiteLink = (id: string, name: string) => (seiten.get(id) ? `[[${seiten.get(id)!.replace(/\.md$/, "")}|${name}]]` : name);
+  if (!nachrichten.size) {
+    return [`**${titel}** – im Domain Atlas gibt es ${allein ? "keine Nachricht über die Grenze" : "keine Nachricht zwischen ihnen"}`
+      + (ruhestand ? ` (nur ${ruhestand} stillgelegte)` : "") + ". Kontexte: "
+      + gruppen.map((g) => `${seiteLink(g.id, g.name)}: ${g.kontexte.map((k) => atlas.kontexte.get(k)?.name ?? k).join(", ")}`).join("; ")
+      + ` · [[${ATLAS_INDEX.replace(/\.md$/, "")}|Kontext-Verzeichnis]]`, []];
+  }
+  gruppen.forEach((g, gi) => {
+    lines.push(`    subgraph g${gi}["${label(g.name, 40)}${g.kontexte.length > 1 ? ` · ${g.kontexte.length} Kontexte` : ""}"]`);
+    for (const k of g.kontexte) {
+      const id = knoten.get(k)!;
+      lines.push(`        ${id}["${label(atlas.kontexte.get(k)?.name ?? k)}"]:::${beteiligt.has(k) ? "kontext" : "grau"}`);
+      clicks.push(...klick(id, seiten.get(k) ?? ATLAS_INDEX, w));
+    }
+    lines.push("    end");
+  });
+  for (const [sd, id] of aussen) {
+    lines.push(`    ${id}["${label(atlas.subdomaenen.get(sd)?.name ?? sd, 40)}"]:::grau`);
+    clicks.push(...klick(id, seiten.get(sd) ?? ATLAS_INDEX, w));
+  }
+  for (const k of kanten.slice(0, MAX_KANTEN)) {
+    const text = label(`${TYP[k.m.typ] ?? k.m.typ}: ${k.m.name}${ABGESTIMMT.has(k.reife) ? "" : ` · ${k.reife || "offen"}`}`, 70);
+    lines.push(`    ${k.von} ${ABGESTIMMT.has(k.reife) ? "-->" : "-.->"}|"${text}"| ${k.an}`);
+  }
+  // Bilanz fuer die Beschriftung: Arten und, bei zwei Gruppen, die Richtungen
+  const arten = new Map<string, number>();
+  for (const id of nachrichten) {
+    const m = kanten.find((k) => k.m.id === id)!.m;
+    const t = TYP[m.typ] ?? (m.typ || "Nachricht");
+    arten.set(t, (arten.get(t) ?? 0) + 1);
+  }
+  const plural = (t: string, n: number) => (n === 1 ? t : t === "Query" ? "Queries" : `${t}s`);
+  const bilanz = [...arten.entries()].map(([t, n]) => `${n} ${plural(t, n)}`).join(", ");
+  const grp = (node: string): number =>
+    (node.startsWith("g") ? Number(node.slice(1)) : node.startsWith("k") ? Number(node.slice(1).split("_")[0]) : -1);
+  const richtung = (a: number, b: number) =>
+    new Set(kanten.filter((k) => grp(k.von) === a && grp(k.an) === b).map((k) => k.m.id)).size;
+  let wege = "";
+  if (gruppen.length === 2) {
+    const [ab, ba] = [richtung(0, 1), richtung(1, 0)];
+    wege = ab && !ba ? `; alle von ${gruppen[0].name} an ${gruppen[1].name}` : ba && !ab ? `; alle von ${gruppen[1].name} an ${gruppen[0].name}`
+      : `; ${ab} von ${gruppen[0].name} an ${gruppen[1].name}, ${ba} zurück`;
+  }
+  const caption = `**${titel}** – Domain Atlas: ${nachrichten.size} Nachricht${nachrichten.size > 1 ? "en" : ""} (${bilanz})${wege}`
+    + (kanten.length > MAX_KANTEN ? ` · im Bild ${MAX_KANTEN} von ${kanten.length} Verbindungen` : "")
+    + (ruhestand ? ` · ${ruhestand} stillgelegte nicht gezeigt` : "")
+    + "\n\nDurchgezogen = abgestimmt (agreed, live), gestrichelt = noch offen (review, proposed). Kasten anklicken öffnet die Notiz"
+    + ` · ${gruppen.map((g) => seiteLink(g.id, g.name)).join(" · ")} · [[${ATLAS_INDEX.replace(/\.md$/, "")}|Kontext-Verzeichnis]]`;
+  const systeme = await bildSysteme(gruppen, atlas, w);
+  return [caption + "\n\n" + mermaid([...lines, ...clicks, ...STYLE]) + (systeme ? "\n\n" + systeme : ""), []];
+}
+
+/** Die Software dahinter: Systeme mit `atlas_kontexte` (System-Seite) fuer die Kontexte der Gruppen,
+ *  ihre Verbindungen und die Atlas-Nachrichten, auf die Systeme uebertragen. */
+async function bildSysteme(gruppen: Gruppe[], atlas: Atlas, w: World): Promise<string> {
+  const kontexte = new Set(gruppen.flatMap((g) => g.kontexte));
+  const systeme = new Map<string, { path: string; name: string; kontexte: string[]; fm: Record<string, unknown> }>();
+  for (const path of w.src.list(DIRS.systems, false).sort()) {
+    const fm = w.src.frontmatter(path);
+    const eigene = (Array.isArray(fm.atlas_kontexte) ? fm.atlas_kontexte : fm.atlas_kontexte ? [fm.atlas_kontexte] : [])
+      .map((x) => strip(String(x ?? ""))).filter((x) => kontexte.has(x));
+    if (eigene.length) systeme.set(stem(path), { path, name: orStr(fm.name, stem(path)), kontexte: eigene, fm });
+  }
+  const ohne = [...kontexte].filter((k) => ![...systeme.values()].some((s) => s.kontexte.includes(k)));
+  const hinweis = "Welches System welchen Kontext umsetzt, steht im Feld `atlas_kontexte:` der System-Seite – "
+    + "Vorschläge zum Abhaken: [[reports/kontext-systeme|Kontexte und Systeme]].";
+  if (!systeme.size) return `**Software (C4):** Für diese Kontexte ist noch kein System zugeordnet. ${hinweis}`;
+  const lines = ["flowchart LR"];
+  const clicks: string[] = [];
+  const ids = new Map<string, string>();
+  [...systeme.keys()].forEach((s, i) => {
+    ids.set(s, `s${i}`);
+    const x = systeme.get(s)!;
+    const ks = x.kontexte.map((k) => atlas.kontexte.get(k)?.name ?? k);
+    lines.push(`    s${i}["${label(x.name, 36)}<br/>${label(ks.join(", "), 60)}"]:::system`);
+    clicks.push(...klick(`s${i}`, x.path, w));
+  });
+  // Nachrichten auf Systeme uebertragen: Absender-Kontext -> sein System, Empfaenger -> seins
+  const sysVon = (ctx: string) => [...systeme.entries()].filter(([, s]) => s.kontexte.includes(ctx)).map(([k]) => k);
+  const kanten = new Map<string, string[]>();
+  for (const m of atlas.nachrichten) {
+    if (m.reife === "retired") continue;
+    for (const p of m.von) for (const c of m.an) {
+      for (const a of sysVon(p)) for (const b of sysVon(c)) {
+        if (a === b) continue;
+        const key = `${a}>${b}`;
+        if (!(kanten.get(key) ?? []).includes(m.name)) kanten.set(key, [...(kanten.get(key) ?? []), m.name]);
+      }
+    }
+  }
+  for (const [key, namen] of kanten) {
+    const [a, b] = key.split(">");
+    lines.push(`    ${ids.get(a)} -->|"${label(namen.length > 2 ? `${namen.length} Nachrichten` : namen.join(", "), 60)}"| ${ids.get(b)}`);
+  }
+  // Verbindungen von den System-Seiten: abgeloest und von Hand eingetragen
+  for (const [s, x] of systeme) {
+    for (const alt of asLinks(x.fm.ersetzt)) if (ids.has(alt)) lines.push(`    ${ids.get(s)} -.->|"löst ab"| ${ids.get(alt)}`);
+    for (const v of asLinks(x.fm.verbindungen)) if (ids.has(v) && v !== s) lines.push(`    ${ids.get(s)} --- ${ids.get(v)}`);
+  }
+  const caption = `**Software (C4):** ${systeme.size} System${systeme.size > 1 ? "e" : ""} setzen diese Kontexte um`
+    + (kanten.size ? `; Pfeile = Atlas-Nachrichten zwischen ihren Kontexten` : "")
+    + (ohne.length ? ` · ohne System: ${ohne.slice(0, 6).map((k) => atlas.kontexte.get(k)?.name ?? k).join(", ")}${ohne.length > 6 ? " …" : ""}` : "")
+    + `. ${hinweis}`;
+  return caption + "\n\n" + mermaid([...lines, ...clicks, ...STYLE]);
+}
+
+function asLinks(v: unknown): string[] {
+  return (Array.isArray(v) ? v : v ? [v] : []).map((x) => {
+    const s = strip(String(x ?? ""));
+    const m = /^\[\[([^\]|#]+)/.exec(s);
+    return strip(m ? m[1] : s).split("/").pop() ?? "";
+  }).filter(Boolean);
+}
+
+// ------------------------------------------------------------------ Bildwunsch
+
+// Starke Woerter wollen immer ein Bild; "zeig" und "mal" nur mit einer Bild-Art ("Sag mal, wo steht
+// X?" und "Zeig mir die offenen Punkte" sind keine Bildwuensche)
+const STARK = new RegExp(`(?<!${W})(zeichne${W}*|bild|bilder|schaubild|diagramm${W}*|diagram|grafik|mermaid|visualis${W}*|skizz${W}*|${W}*malen|male)(?!${W})`, "u");
+const SCHWACH = new RegExp(`(?<!${W})(zeig${W}*)(?!${W})`, "u");
+const ATLAS_FRAGE = /kontext|subdom|domäne|domaene|nachricht|event(?!\s*log)|command|query|schnittstell|interagier|interaktion|zusammenspiel|kommunizier|austausch/;
+const SOFTWARE = /system|software|c4|likec4|umgesetzt|abgebildet|implementier/;
+
+/** Fragt die Frage nach dem Zusammenspiel von Kontexten (Atlas)? */
+export function isAtlasQuestion(frage: string): boolean {
+  return ATLAS_FRAGE.test(frage.toLowerCase());
+}
+
 /** Bittet die Frage um ein Bild, das ein Bild-Skill genau zeichnen kann? */
 export function pictureWish(frage: string, scope: Scope): string | null {
   const q = frage.toLowerCase();
-  const wish = new RegExp(`(?<!${W})(zeichne${W}*|zeig${W}*|bild|diagramm${W}*|grafik|mermaid|visualis${W}*|skizz${W}*|mal${W}*)(?!${W})`, "u");
-  if (!wish.test(q)) return null;
+  const stark = STARK.test(q) || /^\s*mal(?!\p{L})/u.test(q);         // "Mal die Reihen auf"
+  if (!stark && !SCHWACH.test(q)) return null;
   const themen = (scope.themen ?? []).length > 0;
+  const atlas = (scope.atlas ?? []).length > 0;
+  // Kontexte, Nachrichten, Software dahinter: das Atlas-Bild - nie der Themenbaum
+  if (ATLAS_FRAGE.test(q) || (atlas && SOFTWARE.test(q))) return atlas ? "bild-kontexte" : null;
   if (/verlauf|zeitstrahl|timeline|chronolog|histori|was ist passiert/.test(q)) return themen ? "bild-verlauf" : null;
   if (/beteiligt|wer arbeitet|personen|netz|leute/.test(q)) return "bild-beteiligte";
   if (/reihe|gremi|termine|meetings|jour ?fi/.test(q)) return "bild-reihen";
-  if (/baum|struktur|unterthem|landkarte|übersicht|aufbau|hierarch|ampel/.test(q) || themen) return "bild-baum";
-  return null;
+  if (/baum|struktur|unterthem|landkarte|übersicht|aufbau|hierarch|ampel/.test(q)) return "bild-baum";
+  if (!stark) return null;
+  return themen ? "bild-baum" : atlas ? "bild-kontexte" : null;
 }
 
 export function isPicture(name: string): boolean {
@@ -353,6 +602,7 @@ export async function chatPicture(name: string, scope: Scope, w: World, window: 
   if (name === "bild-verlauf") return bildVerlauf(scope, w, window);
   if (name === "bild-beteiligte") return bildBeteiligte(scope, w);
   if (name === "bild-reihen") return bildReihen(scope, w);
+  if (name === "bild-kontexte") return bildKontexte(scope, w);
   return bildBaum(scope, w);
 }
 

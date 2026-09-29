@@ -138,6 +138,9 @@ erzeugt nur, wenn sich der Fingerabdruck (Log + offene Punkte) ändert (`stand_u
   `nachbereitet_von: modell|notbehelf`, `eingearbeitet` (Datum), `archiviert` (Zeitpunkt) → 4.6.
 - Reihen (`entities/forums/`): `project` (Hauptthema der Reihe), `reports_on`, `mit`, `kein_thema`.
 - Personen, Themen, Systeme, Teams, Firmen: `schreibweisen` – bestätigte Verschreiber des Namens (→ 5).
+- Systeme: `atlas_kontexte` – die Kontexte des Domain Atlas, die das System umsetzt; zugeordnet wird nur
+  über die Liste `reports/kontext-systeme.md` (Vorschläge mit Beleg: Name, Daten laut Migrationstabellen,
+  Team), nie geraten (→ 17).
 
 ### 4.5 Archiv
 
@@ -294,12 +297,21 @@ Wortgrenzen geteilt, nie mitten im Wort.
 ## 8. Oberflächen (Obsidian-Plugin)
 
 Heute (ganz oben „Ohne Notizen“, dann Radar, eigene Aufgaben, Termine mit Phase, Nachfassen) ·
-Anleitung für Benutzer (`README.md` im Vault, aus der Vorlage; „?“ in Heute und oben in den
-Einstellungen) · Cockpit-Seiten über Codeblöcke
+Anleitung für Benutzer (ins Plugin eingebaut, `plugin/anleitung.md`, eigene Ansicht; „?“ in Heute und
+oben in den Einstellungen) · Cockpit-Seiten über Codeblöcke
 (```` ```2ndbrain aufgaben ```` / `risiken`, ohne JavaScript in der Notiz) · Sofortsuche (Stand und
 offene Punkte ohne LLM-Wartezeit) · Nacherfassen und Nachbereiten · Chat mit Rezepten und Bildern
 (rechnet ganz im Plugin; nur der Frage-Modus „Offene Fragen“ läuft über die Engine). Welche Teile wo
 laufen: §18.
+
+**Bilder im Chat** zeichnet der Code aus den Daten, nicht das Modell: Themenbaum, Verlauf, Beteiligte,
+Reihen und **Kontexte** – wie Subdomänen und Kontexte des Domain Atlas zusammenspielen (die Nachrichten
+aus dem Kontext-Verzeichnis, durchgezogen = abgestimmt, gestrichelt = offen), darunter die Systeme, die
+sie umsetzen (`atlas_kontexte`), mit den Nachrichten auf die Systeme übertragen. Ein Bild entsteht nur
+auf einen Bildwunsch („zeichne“, „Bild“, „Diagramm“, „Mermaid“ …; „zeig“ nur mit einer Bild-Art wie
+Verlauf oder Themenbaum, „Sag mal …“ ist keiner); eine Frage nach Kontexten bekommt nie den
+Themenbaum. Jeder Kasten trägt den Pfad seiner Notiz im Hinweistext – ein Klick öffnet sie, im Chat wie
+in jeder Notiz (Obsidians Mermaid entfernt obsidian://-Adressen, das Plugin öffnet selbst).
 
 ## 9. Aufbau
 
@@ -307,7 +319,7 @@ laufen: §18.
 |---|---|---|
 | Obsidian-Plugin (TypeScript) | `plugin/` | Desktop und Handy; über Obsidian installiert und aktualisiert |
 | Engine (Python, Paket `2ndbrain`, Modul `secondbrain`) | `engine/secondbrain/` | Desktop; `python -m pip install`, Befehl `2ndbrain` |
-| Vorlagen für einen neuen Vault | `engine/secondbrain/vorlage/` | `2ndbrain einrichten` legt an, was fehlt – auch die Anleitung `README.md` |
+| Vorlagen für einen neuen Vault | `engine/secondbrain/vorlage/` | `2ndbrain einrichten` legt an, was fehlt (die Anleitung steckt im Plugin) |
 | Entwickler-Werkzeuge | `engine/tools/` | nur im Code-Repo: Referenzlauf, Entdrahtung, Plugin- und Prompt-Vergleich |
 
 Im Vault liegt kein Code. Konfiguration, Chat-Rezepte, Protokoll-Vorlage und Daten des Vaults stehen
@@ -442,6 +454,13 @@ die es ändern kann; `--rueckgaengig <notiz>` stellt sie wieder her. In der Auto
 Begriffs-Index, Kontext-Verzeichnis und Glossar laufen als Schritt `wissen` der Automatik, sobald sich
 ihre Quellen ändern (sonst kostet der Schritt nur ein paar `stat`-Aufrufe).
 
+**Kontext-Verzeichnis** (`kontexte.py`, `entities/contexts/_index.md`): Subdomänen, Kontexte und die
+Nachrichten zwischen ihnen (Typ, Reife, von, an; eine Kante mit eigener Reife in Klammern) – als
+Tabellen, lesbar für Menschen und fürs Plugin, das daraus am Handy wie am Desktop das Bild „Kontexte“
+zeichnet. **Kontexte und Systeme** (`kontext_systeme.py`): Vorschläge mit Beleg, welches System welchen
+Kontext umsetzt, als Liste zum Abhaken (`reports/kontext-systeme.md`); die Haken landen als
+`atlas_kontexte` auf der System-Seite, ein entfernter Haken nimmt die Zuordnung zurück.
+
 **Glossar** (`glossar.py`): zählen → Kanon → Bestand → Modell.
 - Gezählt wird nur, was Menschen geschrieben haben: keine Kalender-Exporte, Vorlagen, Code- und
   Diagrammblöcke, automatischen Blöcke, Log-Markierungen, Link-Ziele, fette Beschriftungen; Wörter, die
@@ -499,7 +518,9 @@ Befehle deutsch; das Plugin folgt bei den Dateinamen, im Code selbst stehen engl
 | Rückfrage | `04_Clarifications.md` | `rueckfragen` | `rueckfragen.py` | – |
 | Eingang, Einlesen | `inbox/` | `einlesen` | `einlesen.py`, `mails.py`, `auspacken.py`, `dokumente.py`, `nachfuellen.py` | – |
 | Einarbeiten | `inbox/` → `archive/` | `einarbeiten` | `einarbeiten.py`, `arbeitspaket.py`, `eingang.py`, `eingang_abschluss.py`, `zerlegen.py`, `ausgabe_pruefen.py` | – |
-| Kanon | externes Repo (z. B. Domain Atlas) | `kanon-vorschlaege`, `kontexte` | `kanon.py`, `kanon_vorschlaege.py`, `kontexte.py` | – |
+| Kanon | externes Repo (z. B. Domain Atlas) | `kanon-vorschlaege`, `kontexte` | `kanon.py`, `kanon_vorschlaege.py`, `kontexte.py` | `core/atlas.ts` |
+| Kontexte und Systeme | Feld `atlas_kontexte:`, `reports/kontext-systeme.md` | `kontext-systeme` | `kontext_systeme.py` | `core/chatBilder.ts` |
+| Anleitung | – (im Plugin) | – | – | `anleitung.md`, `views/anleitung.ts` |
 | Begriffs-Index, Glossar | `.2ndbrain/daten/`, `entities/glossary/` | `begriffe`, `glossar`, `wissen` | `begriffsindex.py`, `glossar.py`, `wissen.py` | – |
 | Personen | `entities/people/` | `personen`, `person-neu`, `umbenennen` | `personen.py`, `personen_namen.py`, `beteiligte.py`, `anlegen.py`, `umbenennen.py`, `zusammenfuehren.py`, `aufloesen.py` | `views/personen.ts` |
 | Modell (lokales LLM) | `.2ndbrain/llm.config.json` | `modell` | `modell.py`, `modell_ausgabe.py` | `core/modell.ts` |

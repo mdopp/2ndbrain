@@ -35,6 +35,7 @@ if (mode === "test") {
     outExtension: { ".js": ".mjs" },
     bundle: true, platform: "node", format: "esm", target: "node20",
     external: ["obsidian", ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
+    loader: { ".md": "text" },
     logLevel: "info",
   });
 } else {
@@ -46,6 +47,7 @@ if (mode === "test") {
     outfile: join(outDir, "main.js"),
     bundle: true, format: "cjs", platform: "browser", target: "es2021",
     external,
+    loader: { ".md": "text" },                // die Anleitung (anleitung.md) steckt in main.js
     sourcemap: mode === "production" ? false : "inline",
     treeShaking: true,
     logLevel: "info",

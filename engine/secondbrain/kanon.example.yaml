@@ -5,7 +5,7 @@
 #     "kanon": {"format": "einfach", "pfad": "kanon.yaml"}
 #
 # Der Vault liest den Kanon nur: Glossar (Fachbegriffe mit Definition), Begriffs-Index,
-# Kontext-Verzeichnis, Belege über den MCP-Server. `vault.py atlas-vorschlaege` (oder im Chat
+# Kontext-Verzeichnis, Belege über den MCP-Server. `2ndbrain kanon-vorschlaege` (oder im Chat
 # „Offene Fragen“) schlägt Ergänzungen vor - übernehmen tust du sie hier von Hand.
 #
 # IDs sind optional (sonst aus dem Namen: "Auftrag angelegt" -> auftrag-angelegt). Eine ID, die
