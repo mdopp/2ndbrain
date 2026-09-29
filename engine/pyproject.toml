@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "2ndbrain"
+dynamic = ["version"]
+description = "2ndBrain-Engine: Automatik, Einarbeiten, Vor- und Nachbereiten, Stand, Glossar und MCP-Server für einen Obsidian-Vault"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Michael Dopp" }]
+keywords = ["obsidian", "second-brain", "llm", "mcp"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Natural Language :: German",
+]
+dependencies = [
+    "pyyaml>=6.0.1",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.23",
+    "openpyxl>=3.1.2",
+]
+
+[project.scripts]
+2ndbrain = "secondbrain.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/mdopp/2ndbrain"
+
+[tool.setuptools]
+packages = ["secondbrain"]
+
+[tool.setuptools.package-data]
+# Punkt-Ordner einzeln nennen - Muster wie "**" lassen sie aus
+secondbrain = [
+    "*.json",
+    "*.yaml",
+    "vorlage/*.md",
+    "vorlage/*.base",
+    "vorlage/.templates/*.md",
+    "vorlage/.2ndbrain/*.md",
+    "vorlage/.2ndbrain/chat-skills/*.md",
+    "vorlage/entities/meeting-playbooks/*.md",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "secondbrain.__version__" }

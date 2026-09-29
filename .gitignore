@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+engine/build/
+engine/dist/
+
+# Plugin
+plugin/node_modules/
+plugin/.test-build/
+plugin/dist/
+# lokales Build-Ziel (Pfad zum eigenen Vault) - gehoert nie ins Repo
+plugin/.vault
+
+# Editor, Betriebssystem
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

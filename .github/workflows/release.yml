@@ -1,0 +1,44 @@
+name: Release
+
+# Ein Tag wie 0.9.1 (ohne "v" - so erwartet es Obsidian) baut Plugin und Engine und legt das
+# Release an: main.js, manifest.json, styles.css (Obsidian, BRAT) und das Wheel der Engine
+# (Knopf "Engine installieren" im Plugin).
+on:
+  push:
+    tags: ["*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Version passt zum Tag
+        run: python scripts/version.py --pruefen "$GITHUB_REF_NAME"
+      - name: Engine-Tests
+        run: |
+          python -m pip install -e engine
+          python engine/tests/test_tools.py
+          python engine/tests/test_harness.py
+      - name: Plugin-Tests und Build
+        working-directory: plugin
+        run: |
+          npm ci
+          npm test
+          npm run build:dist
+      - name: Engine-Wheel
+        run: python -m pip wheel ./engine --no-deps -w engine/dist
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          plugin/dist/main.js manifest.json plugin/dist/styles.css engine/dist/*.whl

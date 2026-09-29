@@ -1,0 +1,68 @@
+# Kanon im einfachen Format - das fachliche Modell, gegen das der Vault Fragen stellt.
+#
+# Einrichten: diese Datei als kanon.yaml in den Vault legen (oder woanders) und in
+# .2ndbrain/local.config.json eintragen:
+#     "kanon": {"format": "einfach", "pfad": "kanon.yaml"}
+#
+# Der Vault liest den Kanon nur: Glossar (Fachbegriffe mit Definition), Begriffs-Index,
+# Kontext-Verzeichnis, Belege über den MCP-Server. `vault.py atlas-vorschlaege` (oder im Chat
+# „Offene Fragen“) schlägt Ergänzungen vor - übernehmen tust du sie hier von Hand.
+#
+# IDs sind optional (sonst aus dem Namen: "Auftrag angelegt" -> auftrag-angelegt). Eine ID, die
+# einem Thema im Vault gleicht, verbindet beides (Kontext "disposition" <-> Thema "disposition").
+
+name: Kanon                       # Anzeigename in Fragen und Berichten
+
+subdomaenen:
+  - id: vertrieb
+    name: Vertrieb
+  - id: operations
+    name: Operations
+
+kontexte:                         # Bounded Contexts: wer ist wofür zuständig
+  - id: auftragsannahme
+    name: Auftragsannahme
+    subdomain: vertrieb
+    owner: [team-vertrieb]
+    beschreibung: Nimmt Kundenaufträge an und prüft sie.
+    aliases: [Order Intake]
+  - id: disposition
+    name: Disposition
+    subdomain: operations
+    owner: [team-dispo]
+    beschreibung: Plant Touren und weist Aufträge zu.
+
+begriffe:                         # Fachbegriffe mit Definition - werden Glossar-Einträge
+  - name: Abholauftrag
+    definition: Auftrag an einen Frachtführer, Ware beim Kunden abzuholen.
+    kontext: disposition
+    synonyme: [Pickup]
+  - name: Lieferschein
+    definition: Begleitpapier, das die gelieferte Ware beschreibt.
+    kontext: auftragsannahme
+
+teams:
+  - id: team-vertrieb
+    name: Vertrieb
+  - id: team-dispo
+    name: Dispo
+
+externe:                          # Fremde mit Schnittstelle, in ihrer Rolle
+  - name: Frachtbörse Beispiel
+    kategorie: partner            # partner · lieferant · kunde (oder eigene, siehe unten)
+
+nachrichten:                      # was eine Kontextgrenze überquert
+  - name: Auftrag angelegt
+    von: [auftragsannahme]
+    an: [disposition]
+
+beziehungen:                      # typ: customer-supplier · partnership · …
+  - von: auftragsannahme
+    zu: disposition
+    typ: customer-supplier
+
+ablaeufe:
+  - name: Auftragsabwicklung
+
+# Eigene Kategorien für Externe statt partner/lieferant/kunde: in local.config.json
+#     "kanon": {"format": "einfach", "pfad": "kanon.yaml", "kategorien": ["partner", "behoerde", "kunde"]}

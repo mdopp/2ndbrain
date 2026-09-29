@@ -1,0 +1,52 @@
+{
+  "_hinweis": "Kopie als .2ndbrain/local.config.json anlegen (oder `2ndbrain einrichten`). Hier steht, was diesen Vault ausmacht - der Code selbst kennt keine Namen, Firmen oder Adressen.",
+  "ich": "vorname-nachname",
+  "_ich": "Slug der eigenen Personen-Seite (entities/people/<ich>.md). Deren name: gibt den Vornamen für Beschriftungen, deren email: die interne Mail-Domain.",
+  "beschreibung": "IT-Management, Enterprise-Architektur",
+  "_beschreibung": "Wofür der Vault da ist - steht im Chat-Prompt und in der MCP-Beschreibung.",
+  "interne_domains": [],
+  "_interne_domains": "Nur nötig, wenn die Domain der eigenen Adresse nicht reicht (mehrere Domains). Leer = aus der eigenen Personen-Seite.",
+  "organisation": "",
+  "_organisation": "Name der eigenen Organisation für Prompts und Atlas-Texte. Leer = company: der eigenen Personen-Seite.",
+  "atlas": {
+    "bereich": "",
+    "kundenkontext": ""
+  },
+  "_atlas": "Nur mit Domain Atlas: bereich = Themen-Slug des Bereichs, den der Atlas abbildet (nur dort entstehen Extern-Fragen); kundenkontext = Themen-Slug, unter dem die Kunden stehen (Kunden nur mit belegter Schnittstelle).",
+  "kanon": {
+    "format": "einfach",
+    "pfad": "kanon.yaml"
+  },
+  "_kanon": "Der Architektur-Kanon, gegen den der Vault Fragen stellt (optional): format \"einfach\" = eine YAML-Datei (Vorlage kanon.example.yaml) oder \"domain-atlas\" = Repo mit canon/*/…yaml (pfad oder paths.domain_atlas). \"regeln\": Hausregeln der Organisation - kategorien, owner_hinweis, bericht_ja, paket_kopf, vorschlag {owner:ja, ext, rel:ab, …}.",
+  "glossar": {
+    "kontext": "der IT von <Firma>",
+    "fach": "",
+    "beispiele": "auto",
+    "ignorieren": []
+  },
+  "_glossar": "kontext/fach stehen im Prompt des Glossar-Modells; beispiele: \"auto\" = die meistgenannten bestätigten Namen des Vaults (Systeme der Systemübersicht, Teams/Reihen/Firmen, Atlas-Fachobjekte) - im Vergleich besser als handverlesene; oder fest {\"system\": \"…\", \"fachbegriff\": \"…\", \"organisation\": \"…\"}. ignorieren = Wörter, die nie als Glossar-Begriff vorgeschlagen werden.",
+  "begriffe": {
+    "ignorieren": []
+  },
+  "_begriffe": "Einzelwörter, die in diesem Vault kein Thema unterscheiden (z. B. der Name des eigenen Bereichs, der in vielen Themen steckt) - der Begriffs-Index führt sie nicht einzeln.",
+  "paths": {
+    "domain_atlas": "C:/Users/<benutzer>/domain-atlas",
+    "likec4_model": "C:/Users/<benutzer>/likec4-model"
+  },
+  "entdrahtung": {
+    "allgemein": []
+  },
+  "_entdrahtung": "Nur für Entwickler (`2ndbrain entdrahtung`): Namen dieses Vaults, die zugleich allgemeine Wörter sind und deshalb im Code stehen dürfen (z. B. ein Team namens \"Reporting\").",
+  "auto": {
+    "_hinweis": "true = die Automatik bereitet Notizen mit Material selbst nach. Standard false: nur auf Ansage (Nacherfassen-Fenster).",
+    "wrapup_automatisch": false
+  },
+  "protokoll": {
+    "vorlage": ""
+  },
+  "_protokoll": "Vorlage fürs Protokoll aus Transkripten: Pfad im Vault (z. B. eine sichtbare Notiz). Leer = .2ndbrain/protokoll-vorlage.md. Bearbeiten auch in den Plugin-Einstellungen.",
+  "schreibweisen": {
+    "bereinigen": false
+  },
+  "_schreibweisen": "true = die Automatik schreibt Namen im Bestand (Entscheidungen, Aufgaben, Protokoll, Logs, Stand) wie auf ihren Seiten, sobald eine Schreibweise dazukommt - erst nach einem Blick auf `2ndbrain schreibweisen --bereinigen --vorschau`. Transkripte, Teams-Text, Mitschrift, eigene Notizen und Mails bleiben wörtlich."
+}

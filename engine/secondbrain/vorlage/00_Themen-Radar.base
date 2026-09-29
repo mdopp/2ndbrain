@@ -1,0 +1,84 @@
+filters:
+  and:
+    - file.inFolder("entities/projects")
+properties:
+  health:
+    displayName: Ampel
+  ueberfaellig:
+    displayName: Überfällig
+  offene_punkte:
+    displayName: Offen
+  fragen:
+    displayName: Fragen
+  risiken_30t:
+    displayName: Risiken (30 T)
+  zuletzt_bewegt:
+    displayName: Zuletzt bewegt
+  kind:
+    displayName: Art
+  parent:
+    displayName: Gehört zu
+  stand_updated:
+    displayName: Stand vom
+  ampel_rang:
+    displayName: Rang
+  ampel_grund:
+    displayName: Warum
+  altbestand:
+    displayName: Altbestand
+  naechster_termin:
+    displayName: Nächster Termin
+  beteiligte:
+    displayName: Beteiligt
+views:
+  - type: table
+    name: Radar
+    order:
+      - file.name
+      - health
+      - ueberfaellig
+      - offene_punkte
+      - fragen
+      - risiken_30t
+      - zuletzt_bewegt
+      - kind
+      - parent
+    sort:
+      - property: kind
+        direction: ASC
+      - property: ampel_rang
+        direction: ASC
+      - property: ueberfaellig
+        direction: DESC
+      - property: risiken_30t
+        direction: DESC
+  - type: table
+    name: Rot und gelb
+    filters:
+      and:
+        - health != "green"
+    order:
+      - file.name
+      - health
+      - ampel_grund
+      - ueberfaellig
+      - offene_punkte
+      - risiken_30t
+      - altbestand
+      - naechster_termin
+      - zuletzt_bewegt
+    sort:
+      - property: ampel_rang
+        direction: ASC
+      - property: ueberfaellig
+        direction: DESC
+  - type: table
+    name: Nach Gruppe
+    groupBy:
+      property: parent
+      direction: ASC
+    order:
+      - file.name
+      - health
+      - offene_punkte
+      - kind
