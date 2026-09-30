@@ -1,6 +1,7 @@
 // Einstellungsseite: Anleitung, Engine und Python, Vault-Konfiguration (.2ndbrain/*.json), Kalender, LikeC4.
 import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type SecondBrainPlugin from "./main";
+import type { Wartend } from "./core/nacherfassen";
 import type { SkillRecipe } from "./core/rezepte";
 import { CAL_CONFIG, Json, LLM_CONFIG, LOCAL_CONFIG, PROTOKOLL_VORLAGE, calendarSourceKind, getPath } from "./konfiguration";
 
@@ -24,6 +25,7 @@ export interface SecondBrainSettings {
   likec4Autostart: boolean;  // Systemuebersicht (LikeC4-Explorer) mit dem Plugin starten
   likec4Port: number;
   collapsed: Record<string, boolean>;   // Abschnitte in "Heute": zugeklappt?
+  wartend: Wartend[];        // Aenderungen an Terminen, die gerade nachbereitet werden (main.wartendAbarbeiten)
 }
 
 export const DEFAULT_SETTINGS: SecondBrainSettings = {
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: SecondBrainSettings = {
   likec4Autostart: true,
   likec4Port: 5188,
   collapsed: { nacharbeit: true },
+  wartend: [],
 };
 
 export class SecondBrainSettingTab extends PluginSettingTab {

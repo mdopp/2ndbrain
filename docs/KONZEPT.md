@@ -201,7 +201,9 @@ Rückfrage mit den Kandidaten, „neue Termin-Notiz“ und „kein Termin“ –
 Ein Protokoll ohne passenden Termin bleibt fürs Einarbeiten (es kann auch ein anderes Dokument sein).
 
 **Mails und Dokumente.** Was im Eingang (`inbox/` oder Vault-Wurzel) landet, liest `2ndbrain einlesen`
-bzw. die Automatik ein: Mail → Notiz, Anhänge und ZIPs → eigene Notizen, Bilder → Texterkennung.
+bzw. die Automatik ein: Mail → Notiz, Anhänge und ZIPs → eigene Notizen, Bilder → Texterkennung. Die
+Automatik nimmt aus der Vault-Wurzel nur Mails; Dokumente, Bilder und ZIPs nur aus `inbox/` (was im
+Vault-Ordner selbst liegt, gehört dem Nutzer). Einsortiert wird danach je Lauf nur `je_lauf` Vorgänge.
 Eine Mail, die schon einmal eingelesen und eingearbeitet wurde, wird kein zweites Mal eingelesen; sie
 wandert nach `.trash/doppelte-mails/`. Erkannt wird sie an der Message-ID ihrer Notiz im Archiv, bei
 älteren Mail-Notizen ohne Message-ID am Zeitstempel (Date-Header). Eine Datei, die sich nicht lesen
@@ -556,6 +558,19 @@ geschlossenem Obsidian.
 Aufgaben, Themen-Log, Risiken und Nacherfassen gibt es in beiden Teilen: Die Engine braucht sie für
 ihre eigenen Schritte, das Plugin rechnet damit am Handy. `2ndbrain plugin-vergleich` prüft auf dem
 eigenen Vault, dass beide dasselbe liefern. Den Chat rechnet nur das Plugin.
+
+**Schreiben, während die Engine läuft.** Die Sperre der Automatik (`.2ndbrain/daten/.auto.lock`) sorgt
+dafür, dass nur ein Engine-Lauf zur Zeit rechnet. Das Plugin wartet auf sie nicht mehr für jede Notiz:
+Gefährlich ist nur eine Notiz, die die Engine liest, lange rechnen lässt und dann aus dem alten Stand
+zurückschreibt. Das tut allein die Nachbereitung mit ihrem Termin; sie trägt ihn, solange das Modell
+rechnet, in `.2ndbrain/daten/.in-arbeit.json` ein (`inarbeit.py`) und überschreibt ihn nicht, wenn er sich
+in der Zeit geändert hat (Editor) – dann bleibt die Vormerkung stehen. Der Stand eines Themas setzt seinen
+Block in den aktuellen Text ein. Das Plugin (`core/inarbeit.ts`) schreibt jede andere Notiz sofort
+(Nacherfassen, Abhaken); läuft keine Engine, nimmt es dafür kurz die Sperre. Nur bei dem Termin in Arbeit
+wartet es: die Änderung steht in den Plugin-Daten (übersteht einen Neustart) und kommt dazu, sobald er frei
+ist – bei „Speichern und nachbereiten“ mit neuer Nachbereitung; gibt es den Termin nicht mehr, landen die
+Notizen als „Nachtrag“ in `inbox/`. Die übrigen Schritte der Automatik lesen und schreiben eine Notiz in
+Millisekunden – wie das Tippen im Editor.
 
 Für das Handy: Das Plugin lädt dort ohne Node-Modul; die Sperre der Automatik schreibt es nur am
 Desktop; Frontmatter ändert es zeilengenau (kleine Änderungen, die der Sync zusammenführen kann);

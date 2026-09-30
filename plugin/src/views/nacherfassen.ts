@@ -44,6 +44,9 @@ export class CaptureModal extends Modal {
     if (m.nachbereiten === "angefordert") {
       el.createDiv({ cls: "sb-muted sb-hint", text: "Zum Nachbereiten vorgemerkt – der Desktop erledigt es beim nächsten Lauf." });
     }
+    if (desk && (await this.plugin.inArbeitPfade()).includes(m.path)) {
+      el.createDiv({ cls: "sb-muted sb-hint", text: "Wird gerade nachbereitet – was du jetzt ergänzt, kommt danach dazu." });
+    }
 
     this.material = materialText(await this.app.vault.adapter.read(m.path));
     if (this.material) {
@@ -93,13 +96,14 @@ export class CaptureModal extends Modal {
       return;
     }
     this.busy("Speichere …");
-    const r = await this.plugin.setEntfallen(this.meeting.path, true);
+    const r = await this.plugin.setEntfallen(this.meeting.path, true, this.meeting.title);
     if (!r.ok) {
       this.busy(null);
       this.errorEl.setText(r.grund ?? "Hat nicht geklappt.");
       return;
     }
-    new Notice(`„${this.meeting.title}“: fand nicht statt`);
+    new Notice(r.wartet ? `„${this.meeting.title}“ wird gerade nachbereitet – „fand nicht statt“ kommt danach dazu.`
+      : `„${this.meeting.title}“: fand nicht statt`);
     this.close();
     await this.plugin.refreshTasks();
   }
@@ -115,7 +119,13 @@ export class CaptureModal extends Modal {
     }
     if (text) {
       this.busy("Speichere …");
-      const r = await this.plugin.captureNotes(this.meeting.path, text);
+      const r = await this.plugin.captureNotes(this.meeting.path, text, wrapup && desk, this.meeting.title);
+      if (r.wartet) {                            // der Termin wird gerade nachbereitet: vorgemerkt
+        new Notice(`„${this.meeting.title}“ wird gerade nachbereitet – deine Notizen kommen danach dazu`
+          + `${wrapup && desk ? " und werden noch einmal nachbereitet" : ""}.`, 8000);
+        this.close();
+        return;
+      }
       if (!r.ok) return fail(r.grund ?? "Speichern fehlgeschlagen.");
     }
     if (!wrapup) {
@@ -125,7 +135,7 @@ export class CaptureModal extends Modal {
       return;
     }
     if (!desk) {                                 // Handy: vormerken, der Desktop bereitet nach
-      const r = await this.plugin.requestWrapup(this.meeting.path);
+      const r = await this.plugin.requestWrapup(this.meeting.path, true, this.meeting.title);
       if (!r.ok) return fail(r.grund ?? "Vormerken fehlgeschlagen.");
       new Notice("Gespeichert und zum Nachbereiten vorgemerkt – der Desktop erledigt es beim nächsten Lauf.", 6000);
       this.close();

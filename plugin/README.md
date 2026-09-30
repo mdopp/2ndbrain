@@ -16,7 +16,7 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.11.2)
+## Was es kann (0.11.3)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Cockpit-Seiten** (`01_Aufgaben.md`, `05_Risiken.md`): Codeblock `2ndbrain aufgaben` / `risiken`, ohne JavaScript in der Notiz | ja | ja | nein |
 | **Sofortsuche**: Thema oder Person → Stand-Block, offene Punkte, Fragen | ja | ja | nein |
 | **Nacherfassen**: Notizen anhängen, *Fand nicht statt*, überspringen | ja | ja | nein |
-| **Nachbereiten**: am Desktop sofort (im Hintergrund, mit Ergebnis und *Rückgängig*); am Handy *Speichern und vormerken* – der Desktop bereitet beim nächsten Lauf der Automatik nach | vormerken | ja | ja |
+| **Nachbereiten**: am Desktop sofort (im Hintergrund, mit Ergebnis und *Rückgängig*); mehrere Termine reihen sich ein, Speichern geht auch, während die Automatik läuft – nur Ergänzungen zum Termin, der gerade nachbereitet wird, warten auf ihn; am Handy *Speichern und vormerken* – der Desktop bereitet beim nächsten Lauf der Automatik nach | vormerken | ja | ja |
 | **Fragen an den Vault** (Chat): Antworten nur aus dem Vault, mit Quellen; Skills als Knöpfe; **Bilder** (Themenbaum, Verlauf, Beteiligte, Reihen, Kontexte aus dem Domain Atlas mit den Systemen dahinter) zeichnet der Code als Mermaid – ein Klick auf einen Kasten öffnet seine Notiz | ja | ja | ja (Bilder nein) |
 | **Fragen über mehrere Schritte**: das Modell schlägt nach – `search`, `read`, `path` (Wege zwischen zwei Punkten über ihre Zwischenstationen), `neighbors` (Umkreis, etwa alle Personen mit Bezug zu einem Thema) über einen Graphen aus Notizen, Domain Atlas und Systemübersicht; dazu `tasks`, `log`, `meetings` (mit Kalender), `query` (Frontmatter) und `atlas` (Nachrichten nach Event/Command/Query, Prozesse, Teams, Domänenmodell) – gefiltert und gezählt vom Code; offene Notiz und Gespräch gehen mit, die Wartezeile zeigt Runde und Werkzeug; passt ein Name auf mehrere (etwa ein Vorname), nennt der Code alle und der Chat fragt zurück, statt zu raten | ja | ja | ja |
 | **Anleitung**: eingebaut (`anleitung.md`, steckt in main.js), eigene Ansicht | ja | ja | nein |

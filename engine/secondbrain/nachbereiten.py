@@ -435,9 +435,20 @@ def _previous_meeting_stem(path: Path, fm: dict, title: str) -> str | None:
 
 # --------------------------------------------------------------------- Lauf
 
+# Der Termin wurde geaendert, waehrend das Modell rechnete (etwa im Editor getippt): nichts geschrieben
+GEAENDERT = "waehrenddessen geaendert"
+
+
 def process_note(path: Path, *, dry_run: bool = False, min_chars: int = MIN_PROSE_CHARS) -> dict:
     """`min_chars`: ab wann Material reicht - auf Ansage (Nacherfassen, Vormerkung)
-    genuegen wenige Stichpunkte, sonst gilt MIN_PROSE_CHARS."""
+    genuegen wenige Stichpunkte, sonst gilt MIN_PROSE_CHARS. Solange das Modell rechnet, steht der
+    Termin als in Arbeit (inarbeit.py): das Plugin schreibt andere Notizen weiter, diese erst danach."""
+    import inarbeit
+    with inarbeit.in_arbeit(path, aktiv=not dry_run):
+        return _process_note(path, dry_run=dry_run, min_chars=min_chars)
+
+
+def _process_note(path: Path, *, dry_run: bool, min_chars: int) -> dict:
     text = path.read_text(encoding="utf-8")
     fm, _ = vp.split_frontmatter(text)
     title = str(fm.get("title") or path.stem)
@@ -507,6 +518,10 @@ def process_note(path: Path, *, dry_run: bool = False, min_chars: int = MIN_PROS
     n_act = len(result.get("actions") or [])
 
     if not dry_run:
+        if path.read_text(encoding="utf-8") != text:
+            # Geaendert, waehrend das Modell rechnete: der neue Text wuerde es ueberschreiben. Die
+            # Notiz bleibt, wie sie jetzt ist; beim naechsten Nachbereiten kommt das Neue mit.
+            return {"path": path, "status": GEAENDERT, "changed": False, "entscheidungen": 0, "actions": 0}
         save_undo(path, text)            # Zustand davor - fuer "Rueckgaengig"
         if new_text != text:
             path.write_text(new_text, encoding="utf-8", newline="\n")

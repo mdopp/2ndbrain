@@ -113,10 +113,19 @@ export class TodayView extends ItemView {
     }
   }
 
-  /** Nachbereitungen im Hintergrund: wartet / laeuft / fertig (mit Ergebnis) / Fehler. */
+  /** Nachbereitungen im Hintergrund: wartet / laeuft / fertig (mit Ergebnis) / Fehler - davor, was auf
+   *  einen Termin wartet, der gerade nachbereitet wird. */
   private renderJobs(root: HTMLElement): void {
-    if (!this.plugin.jobs.length) return;
+    const wartend = this.plugin.settings.wartend;
+    if (!this.plugin.jobs.length && !wartend.length) return;
     const sec = root.createDiv({ cls: "sb-jobs" });
+    for (const w of wartend) {
+      const row = sec.createDiv({ cls: "sb-row sb-job sb-job-wartet" });
+      setIcon(row.createSpan({ cls: "sb-icon" }), "clock");
+      row.createSpan({ text: `${w.art === "notizen" ? "Notizen warten" : "Änderung wartet"}`
+        + `${w.nachbereiten ? ", dann nachbereiten" : ""}: ` });
+      this.link(row, w.pfad, w.titel, "sb-grow");
+    }
     const icon = { "wartet": "clock", "läuft": "loader", "fertig": "check", "fehler": "x" } as const;
     const label = { "wartet": "Nachbereitung wartet", "läuft": "Nachbereitung läuft",
                     "fertig": "Nachbereitet", "fehler": "Nicht nachbereitet" } as const;
@@ -311,8 +320,8 @@ export class TodayView extends ItemView {
   }
 
   private renderBacklog(root: HTMLElement, meetings: MeetingInfo[], today: string): void {
-    const inWork = new Set(this.plugin.jobs.filter((j) => j.state === "wartet" || j.state === "läuft")
-      .map((j) => j.meeting.path));
+    const inWork = new Set([...this.plugin.jobs.filter((j) => j.state === "wartet" || j.state === "läuft")
+      .map((j) => j.meeting.path), ...this.plugin.settings.wartend.filter((w) => w.nachbereiten).map((w) => w.pfad)]);
     const pending = pendingWrapups(meetings, today, BACKLOG_DAYS).filter((m) => m.date < today && !inWork.has(m.path));
     const open = this.plugin.openTopics;
     if (!pending.length && !open.length) return;
@@ -358,9 +367,13 @@ export class TodayView extends ItemView {
   }
 
   private async skip(m: MeetingInfo): Promise<void> {
-    const r = await this.plugin.setSkip(m.path, true);
+    const r = await this.plugin.setSkip(m.path, true, m.title);
     if (!r.ok) {
       new Notice(`Nicht geändert: ${r.grund ?? "Fehler"}`);
+      return;
+    }
+    if (r.wartet) {
+      new Notice(`„${m.title}“ wird gerade nachbereitet – „übersprungen“ kommt danach dazu.`);
       return;
     }
     new Notice(createFragment((f) => {

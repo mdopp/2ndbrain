@@ -60,6 +60,10 @@ Kalender → Termin-Notiz → vorbereitet → Notizen / Transkript → nachberei
 - **Fand nicht statt?** Im Nacherfassen „Fand nicht statt“ – der Termin heißt dann *entfallen*.
 - **Nichts festzuhalten?** ⏭ überspringen (der Hinweis danach bietet „rückgängig“).
 - **Unterwegs?** Am Handy „Speichern und vormerken“ – der Desktop bereitet beim nächsten Lauf nach.
+- **Mehrere Termine hintereinander?** Einfach weitermachen: Speichern geht immer, auch während die
+  Automatik oder eine andere Nachbereitung läuft; die Nachbereitungen reihen sich ein (Seitenleiste:
+  *wartet*, *läuft*). Nur wenn du einen Termin ergänzt, der gerade selbst nachbereitet wird, warten deine
+  Notizen, bis er fertig ist – dann kommen sie dazu und er wird noch einmal nachbereitet.
 - **Stimmt etwas nicht?** Im Ergebnis „Rückgängig machen“ oder Befehl „Nachbereitung dieses Termins
   zurücknehmen“ – das holt auch einen schon archivierten Termin zurück.
 
@@ -89,8 +93,12 @@ Ort im Vault, den du dort einträgst (zum Beispiel eine sichtbare Notiz).
 ## Eingang: Mails und Dokumente
 
 In `inbox/` gehört alles, was noch einsortiert werden muss: Mails (`.eml`), PDF, Word, PowerPoint,
-Excel, Bilder, ZIP-Archive. Die Automatik packt aus, macht Notizen daraus (Text oder Texterkennung) und
-sortiert sie zu Themen, Personen und Terminen.
+Excel, Bilder, ZIP-Archive, Teams-Transkripte (`.vtt`). Die Automatik packt bei jedem Lauf aus, macht
+Notizen daraus (Text oder Texterkennung; das Original wandert nach `.attachments/`) und sortiert sie zu
+Themen, Personen und Terminen – je Lauf drei Vorgänge (`"je_lauf"` in `.2ndbrain/local.config.json`),
+ein großer Stapel braucht also ein paar Läufe. Eine Datei, die sich nicht lesen lässt (altes `.doc`,
+beschädigt), bleibt mit Grund liegen. Mails aus Outlook als `.eml` speichern – `.msg` liest 2ndBrain
+nicht. Was direkt im Vault-Ordner liegt, bleibt unberührt (außer Mails).
 
 Mit dem Modell einsortiert wird erst nach deiner Freigabe: einmal den Probelauf ansehen
 (`2ndbrain einarbeiten --probelauf`), dann in `.2ndbrain/local.config.json`

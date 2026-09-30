@@ -388,7 +388,8 @@ def update_topic(path: Path, open_tasks: list[tk.Task], meeting, today: date, ll
     f["unterthemen"] = [(x["slug"], x["title"], x["health"], x["open"]) for x in sub or []]
     report.update(facts=f, prose=prose)
     import schreibweisen                # Namen wie auf ihren Seiten - auch Termintitel aus dem Kalender
-    new_text = apply_block(text, schreibweisen.vereinheitlichen(render_block(f, prose, today))[0])
+    block = schreibweisen.vereinheitlichen(render_block(f, prose, today))[0]
+    new_text = apply_block(text, block)
     store_fp = (report["llm"] or not events) and stored_fp != fp
     # Radar-Eigenschaften (00_Themen-Radar.base sortiert/filtert danach)
     radar = {"health": f["health"], "offene_punkte": f["open"], "ueberfaellig": f["overdue"],
@@ -413,6 +414,11 @@ def update_topic(path: Path, open_tasks: list[tk.Task], meeting, today: date, ll
     report["changed"] = new_text != text or radar_changed
     if report["changed"] and not dry_run:
         if new_text != text:
+            # Waehrend das Modell den Stand schrieb, kann die Datei sich geaendert haben (ein Haken im
+            # Plugin, der Editor): der Block kommt in den aktuellen Text, alles andere bleibt, wie es ist.
+            jetzt = path.read_text(encoding="utf-8")
+            if jetzt != text:
+                new_text = apply_block(jetzt, block)
             path.write_text(new_text, encoding="utf-8", newline="\n")
         if radar_changed:
             vp.update_frontmatter(path, radar)

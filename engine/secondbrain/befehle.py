@@ -138,7 +138,9 @@ def main() -> int:
         import json
         import einrichten
         v = einrichten.version()
-        print(json.dumps({"version": v, "python": py}) if "--json" in args else v)
+        # aus dem Code-Repo installiert (pip install -e): das Plugin legt dann kein Wheel darueber
+        quelltext = str(REPO / "engine") if REPO else None
+        print(json.dumps({"version": v, "python": py, "quelltext": quelltext}) if "--json" in args else v)
         return 0
     if cmd not in BEFEHLE:
         print(f"[FEHLER] Unbekannter Befehl: '{cmd}'", file=sys.stderr)

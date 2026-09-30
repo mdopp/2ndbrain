@@ -112,6 +112,37 @@ export function setWrapupRequest(note: string, on: boolean): CaptureResult {
            text: fmUpdate(t, { [WRAPUP_FLAG]: on ? WRAPUP_REQUESTED : null }) };
 }
 
+// --------------------------------------------------------------- Vorgemerkt: wartet auf den Termin
+
+/** Eine Aenderung an einem Termin, der gerade nachbereitet wird (core/inarbeit.ts): sie wartet in den
+ *  Plugin-Daten - uebersteht einen Neustart - und wird geschrieben, sobald der Termin frei ist. */
+export interface Wartend {
+  pfad: string;
+  titel: string;
+  art: "notizen" | "entfallen" | "ueberspringen" | "vormerken";
+  text?: string;             // notizen
+  an?: boolean;              // entfallen, ueberspringen, vormerken
+  nachbereiten?: boolean;    // danach nachbereiten (Desktop)
+  seit: string;              // ISO-Zeitpunkt der Eingabe
+}
+
+/** Die Aenderung auf den Text der Notiz anwenden - dieselben Funktionen wie beim sofortigen Schreiben. */
+export function anwenden(w: Wartend, note: string, today: string): CaptureResult {
+  switch (w.art) {
+    case "notizen": return appendNotes(note, w.text ?? "", today);
+    case "entfallen": return setEntfallen(note, w.an ?? true, null);
+    case "ueberspringen": return setSkip(note, w.an ?? true);
+    case "vormerken": return setWrapupRequest(note, w.an ?? true);
+  }
+}
+
+/** In die Warteliste: Notizen kommen dazu (jede fuer sich, in ihrer Reihenfolge); ein Schalter ersetzt
+ *  den vorigen derselben Art am selben Termin. */
+export function vormerken(liste: Wartend[], w: Wartend): Wartend[] {
+  const rest = w.art === "notizen" ? liste : liste.filter((x) => !(x.pfad === w.pfad && x.art === w.art));
+  return [...rest, w];
+}
+
 // --------------------------------------------------------------- Frontmatter, zeilengenau
 // Nur die betroffenen Felder aendern sich; die Engine schreibt das Frontmatter beim naechsten Mal
 // ohnehin neu. So bleiben Aenderungen am Handy klein, und der Sync kann sie mit dem zusammenfuehren,

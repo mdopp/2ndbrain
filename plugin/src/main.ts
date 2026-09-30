@@ -1,9 +1,9 @@
 // Das Plugin: Ansichten, Befehle, Zustand. Lesen, Erfassen und Chat rechnet es selbst (src/core);
 // fuer alles andere startet es am Desktop die Python-Engine (src/desktop).
 import { FileSystemAdapter, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, normalizePath, requestUrl } from "obsidian";
-import {
-  CaptureResult as CoreCaptureResult, appendNotes, capturable, setEntfallen, setSkip, setWrapupRequest,
-} from "./core/nacherfassen";
+import { CaptureResult as CoreCaptureResult, Wartend, anwenden, capturable, vormerken } from "./core/nacherfassen";
+import { IN_ARBEIT, inArbeit, schreibweg } from "./core/inarbeit";
+import { stem } from "./core/quelle";
 import { ChatAnswer, ChatRequest, Fortschritt, ask } from "./core/chat";
 import { localIsoDate } from "./core/datum";
 import { Graph, baueGraph } from "./core/graph";
@@ -47,7 +47,8 @@ export interface EinrichtenErgebnis { ok: boolean; schritte: { ok: boolean; schr
 /** Engine: installiert, passende Version? */
 export interface EngineStatus { state: "unbekannt" | "fehlt" | "abweichend" | "ok"; version: string | null; text: string }
 interface AutoResult { ok: boolean; llm?: boolean; seconds?: number; skipped?: string; steps: AutoStep[] }
-export interface CaptureResult { ok: boolean; grund?: string; geaendert?: boolean; aktion?: string; note?: string }
+/** `wartet`: der Termin wird gerade nachbereitet - die Aenderung ist vorgemerkt und kommt danach dazu. */
+export interface CaptureResult { ok: boolean; grund?: string; geaendert?: boolean; aktion?: string; note?: string; wartet?: boolean }
 export interface UndoInfo {
   ok: boolean;
   status: string;
@@ -104,6 +105,9 @@ export default class SecondBrainPlugin extends Plugin {
   private pythonCheckedAt = 0;
   private pythonWarned = false;
   private engineWarned = false;
+  private engineQuelltext: string | null = null;   // Engine aus dem Code-Repo (pip install -e) - Entwicklung
+  private wartendAktiv = false;   // wartendAbarbeiten laeuft
+  private beendet = false;        // Plugin entladen: die Warteschleife hoert auf
   private statusEl: HTMLElement | null = null;
   // aus .2ndbrain/ (am Handy oft nicht vorhanden - dann gilt die Kopie in settings.spiegel)
   private llmCfg: { url: string; model: string; timeoutS: number } | null = null;
@@ -171,6 +175,7 @@ export default class SecondBrainPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.beendet = true;
     if (this.autoTimer !== null) window.clearInterval(this.autoTimer);
     this.desktop?.likec4.stop();
   }
@@ -180,6 +185,7 @@ export default class SecondBrainPlugin extends Plugin {
     await this.loadVaultConfig();
     await this.refreshLlm();
     if (!this.desktop) return;
+    if (this.settings.wartend.length) void this.wartendAbarbeiten();   // vorgemerkt vor dem Neustart
     await this.resolvePython();
     await this.refreshEngine();
     if (this.engineStatus.state === "fehlt") {
@@ -197,8 +203,21 @@ export default class SecondBrainPlugin extends Plugin {
   /** Ist die Engine in diesem Python installiert, und passt ihre Version zum Plugin? */
   async refreshEngine(): Promise<EngineStatus> {
     if (!this.desktop) return this.engineStatus;
-    const r = await this.engine.json<{ version: string; python: string }>(["version", "--json"], { timeoutMs: 60_000 });
+    const r = await this.engine.json<{ version: string; python: string; quelltext?: string | null }>(
+      ["version", "--json"], { timeoutMs: 60_000 });
     const soll = this.manifest.version;
+    this.engineQuelltext = r?.quelltext ?? null;
+    if (r?.version && r.version !== soll && this.engineQuelltext) {
+      // Entwicklung (pip install -e): die Engine folgt dem Code-Repo - kein Wheel darueberlegen
+      this.engineStatus = { state: "abweichend", version: r.version,
+        text: `Version ${r.version} aus dem Code-Repo (${this.engineQuelltext}), das Plugin ist ${soll} – Plugin neu laden oder neu bauen.` };
+      if (!this.engineWarned) {
+        this.engineWarned = true;
+        new Notice(`2ndBrain: Die Engine läuft aus dem Code-Repo und ist ${r.version}, das Plugin ${soll} – Plugin neu laden `
+          + "(oder `npm run build`).", 15_000);
+      }
+      return this.engineStatus;
+    }
     if (!r?.version) {
       this.engineStatus = { state: "fehlt", version: null,
         text: this.pythonInfo ? `Nicht installiert in ${this.pythonInfo.executable}.` : "Kein Python gefunden." };
@@ -235,13 +254,14 @@ export default class SecondBrainPlugin extends Plugin {
   }
 
   /** Engine installieren oder aktualisieren: `python -m pip install --upgrade <Quelle>`. Quelle: eingetragen >
-   *  dem Plugin beigelegt > GitHub-Release. Lehnt das Python des Systems pip ab (Homebrew, PEP 668), bekommt
-   *  die Engine eine eigene Umgebung (~/.2ndbrain/venv), deren Python danach eingetragen ist. */
+   *  das Code-Repo, aus dem sie schon laeuft (Entwicklung) > dem Plugin beigelegt > GitHub-Release. Lehnt das
+   *  Python des Systems pip ab (Homebrew, PEP 668), bekommt die Engine eine eigene Umgebung
+   *  (~/.2ndbrain/venv), deren Python danach eingetragen ist. */
   async installEngine(): Promise<boolean> {
     if (!this.desktop) return false;
     const v = this.manifest.version;
-    const quelle = this.settings.engineQuelle.trim() || (await this.beigelegteEngine(v))
-      || `${ENGINE_REPO}/releases/download/${v}/2ndbrain-${v}-py3-none-any.whl`;
+    const quelle = this.settings.engineQuelle.trim() || (this.engineQuelltext ? `-e ${this.engineQuelltext}` : "")
+      || (await this.beigelegteEngine(v)) || `${ENGINE_REPO}/releases/download/${v}/2ndbrain-${v}-py3-none-any.whl`;
     const ziel = quelle.startsWith("-e ") ? ["-e", quelle.slice(3).trim()] : [quelle];
     new Notice("2ndBrain: Engine wird installiert …");
     const pip = () => this.engine.python(["-m", "pip", "install", "--upgrade", ...ziel], { timeoutMs: 10 * 60_000 });
@@ -353,7 +373,8 @@ export default class SecondBrainPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const s = ((await this.loadData()) as Partial<SecondBrainSettings> | null) ?? {};
-    this.settings = { ...DEFAULT_SETTINGS, ...s, spiegel: { ...DEFAULT_SETTINGS.spiegel, ...(s.spiegel ?? {}) } };
+    this.settings = { ...DEFAULT_SETTINGS, ...s, spiegel: { ...DEFAULT_SETTINGS.spiegel, ...(s.spiegel ?? {}) },
+                      wartend: Array.isArray(s.wartend) ? s.wartend : [] };
   }
 
   async saveSettings(): Promise<void> {
@@ -742,40 +763,129 @@ export default class SecondBrainPlugin extends Plugin {
     new CaptureModal(this.app, this, m).open();
   }
 
-  /** Eine Aenderung an einer Termin-Notiz (src/core/nacherfassen.ts), unter der Sperre der Automatik. */
+  /** Eine Aenderung an einer Termin-Notiz (src/core/nacherfassen.ts) - auch waehrend die Engine laeuft, nur
+   *  nicht an dem Termin, den sie gerade nachbereitet: dann `wartet`, nichts geschrieben. */
   private async applyCapture(path: string, op: (text: string) => CoreCaptureResult): Promise<CaptureResult> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!capturable(path) || !(file instanceof TFile)) return { ok: false, grund: `Keine Termin-Notiz: ${path}` };
-    if (!(await this.acquireAutoLock())) return { ok: false, grund: "Die Automatik läuft gerade – gleich noch einmal." };
+    let result: CoreCaptureResult = { ok: false, grund: "Nicht geschrieben." };
+    const weg = await this.schreiben(file, (current) => {
+      result = op(current);
+      return result.ok && result.text !== undefined ? result.text : current;
+    });
+    if (weg === "warten") return { ok: false, wartet: true, grund: "Der Termin wird gerade nachbereitet." };
+    return { ok: result.ok, grund: result.grund, aktion: result.aktion };
+  }
+
+  /** In eine Notiz schreiben (core/inarbeit.ts): laeuft keine Engine, kurz ihre Sperre nehmen - sonst
+   *  startete eine Automatik mitten hinein; laeuft sie, sofort - ausser sie arbeitet gerade an genau dieser
+   *  Notiz ("warten", nichts geschrieben). Am Handy immer sofort (keine Engine, keine Sperre). */
+  private async schreiben(file: TFile, fn: (current: string) => string): Promise<"ok" | "warten"> {
+    const frei = await this.acquireAutoLock();
     try {
-      let result: CoreCaptureResult = { ok: false, grund: "Nicht geschrieben." };
-      await this.app.vault.process(file, (current) => {
-        result = op(current);
-        return result.ok && result.text !== undefined ? result.text : current;
-      });
-      return { ok: result.ok, grund: result.grund, aktion: result.aktion };
+      if (schreibweg(file.path, frei, frei ? [] : await this.inArbeitPfade()) === "warten") return "warten";
+      await this.app.vault.process(file, fn);
+      return "ok";
     } finally {
-      await this.releaseAutoLock();
+      if (frei) await this.releaseAutoLock();
     }
   }
 
-  async captureNotes(path: string, text: string): Promise<CaptureResult> {
-    const today = localIsoDate();
-    return this.applyCapture(path, (t) => appendNotes(t, text, today));
+  /** Woran die Engine gerade lange arbeitet (engine/secondbrain/inarbeit.py) - Pfade im Vault. */
+  async inArbeitPfade(): Promise<string[]> {
+    if (!this.desktop) return [];
+    const adapter = this.app.vault.adapter;
+    try {
+      const st = await adapter.stat(IN_ARBEIT);
+      return st ? inArbeit(await adapter.read(IN_ARBEIT), Date.now() - st.mtime) : [];
+    } catch {
+      return [];
+    }
   }
 
-  async setEntfallen(path: string, on: boolean): Promise<CaptureResult> {
-    return this.applyCapture(path, (t) => setEntfallen(t, on, null));
+  /** Notizen anhaengen. `nachbereiten` gilt nur fuer eine Vormerkung (danach nachbereiten); sofort
+   *  gespeichert startet das Fenster die Nachbereitung selbst. */
+  async captureNotes(path: string, text: string, nachbereiten = false, titel = ""): Promise<CaptureResult> {
+    return this.aendern({ pfad: path, titel, art: "notizen", text, nachbereiten, seit: new Date().toISOString() });
+  }
+
+  async setEntfallen(path: string, on: boolean, titel = ""): Promise<CaptureResult> {
+    return this.aendern({ pfad: path, titel, art: "entfallen", an: on, seit: new Date().toISOString() });
   }
 
   /** Ueberspringen: keine Notizen noetig (privat, gesellig) - `skip_meeting`. */
-  async setSkip(path: string, on: boolean): Promise<CaptureResult> {
-    return this.applyCapture(path, (t) => setSkip(t, on));
+  async setSkip(path: string, on: boolean, titel = ""): Promise<CaptureResult> {
+    return this.aendern({ pfad: path, titel, art: "ueberspringen", an: on, seit: new Date().toISOString() });
   }
 
   /** Nachbereiten vormerken (Handy): die Automatik am Desktop arbeitet es beim naechsten Lauf ab. */
-  async requestWrapup(path: string, on = true): Promise<CaptureResult> {
-    return this.applyCapture(path, (t) => setWrapupRequest(t, on));
+  async requestWrapup(path: string, on = true, titel = ""): Promise<CaptureResult> {
+    return this.aendern({ pfad: path, titel, art: "vormerken", an: on, seit: new Date().toISOString() });
+  }
+
+  /** Eine Aenderung sofort - oder, bereitet die Engine genau diesen Termin gerade nach, vorgemerkt: in den
+   *  Plugin-Daten (uebersteht einen Neustart), geschrieben, sobald der Termin frei ist. */
+  private async aendern(w: Wartend): Promise<CaptureResult> {
+    const r = await this.applyCapture(w.pfad, (t) => anwenden(w, t, localIsoDate()));
+    if (!r.wartet) return r;
+    this.settings.wartend = vormerken(this.settings.wartend, { ...w, titel: w.titel || stem(w.pfad) });
+    await this.saveSettings();
+    void this.wartendAbarbeiten();
+    void this.refreshViews();
+    return { ok: true, wartet: true };
+  }
+
+  /** Vorgemerkte Aenderungen schreiben, sobald ihr Termin frei ist - alle 10 s nachsehen, der Reihe nach;
+   *  danach, wenn gewuenscht, nachbereiten. Gibt es den Termin nicht mehr, kommen Notizen in den Eingang. */
+  private async wartendAbarbeiten(): Promise<void> {
+    if (!this.desktop || this.wartendAktiv) return;
+    this.wartendAktiv = true;
+    try {
+      while (this.settings.wartend.length && !this.beendet) {
+        for (const w of [...this.settings.wartend]) {
+          const pfad = this.terminPfad(w.pfad);
+          const r: CaptureResult = pfad ? await this.applyCapture(pfad, (t) => anwenden(w, t, localIsoDate()))
+            : { ok: false, grund: "Termin nicht mehr gefunden" };
+          if (r.wartet) continue;
+          if (!r.ok && w.art === "notizen") await this.notizenRetten(w, r.grund ?? "");
+          this.settings.wartend = this.settings.wartend.filter((x) => x !== w);
+          await this.saveSettings();
+          new Notice(r.ok ? `2ndBrain: Vorgemerkt und jetzt geschrieben – ${w.titel}`
+            : `2ndBrain: „${w.titel}“ – ${r.grund ?? "nicht geschrieben"}`
+              + (w.art === "notizen" ? " (die Notizen liegen als „Nachtrag“ in inbox/)" : ""), 8000);
+          if (r.ok && w.nachbereiten && pfad) {
+            const m = await this.index.meeting(pfad);
+            if (m) this.startWrapup(m);
+          }
+        }
+        void this.refreshViews();
+        if (this.settings.wartend.length) await new Promise((fertig) => window.setTimeout(fertig, 10_000));
+      }
+      await this.refreshTasks();
+    } finally {
+      this.wartendAktiv = false;
+      void this.refreshViews();
+    }
+  }
+
+  /** Der Termin einer Vormerkung - auch wenn er inzwischen umbenannt wurde (Dateiname). */
+  private terminPfad(pfad: string): string | null {
+    if (this.app.vault.getAbstractFileByPath(pfad) instanceof TFile) return pfad;
+    const f = this.app.metadataCache.getFirstLinkpathDest(stem(pfad), "");
+    return f && capturable(f.path) ? f.path : null;
+  }
+
+  /** Vorgemerkte Notizen, die nicht in ihren Termin kamen: als Notiz in den Eingang - nie verloren. */
+  private async notizenRetten(w: Wartend, grund: string): Promise<void> {
+    const name = `Nachtrag ${w.titel} ${Date.now()}`.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim();
+    const inhalt = `# Nachtrag: ${w.titel}\n\nNotizen vom ${w.seit.slice(0, 10)}, die nicht in den Termin kamen `
+      + `(${grund}). Termin: [[${stem(w.pfad)}]]\n\n${w.text ?? ""}\n`;
+    try {
+      if (!(await this.app.vault.adapter.exists("inbox"))) await this.app.vault.createFolder("inbox");
+      await this.app.vault.create(normalizePath(`inbox/${name}.md`), inhalt);
+    } catch (e) {
+      new Notice(`2ndBrain: Notizen zu „${w.titel}“ nicht gesichert – ${String(e)}\n\n${w.text ?? ""}`, 0);
+    }
   }
 
   /** Nachbereitung dieses Termins (Modell, Sync ins Themen-Log, Stand). Rueckgabe: Kurztext. */
@@ -912,24 +1022,20 @@ export default class SecondBrainPlugin extends Plugin {
     return r;
   }
 
-  /** [x] und ✅ heute (wie `2ndbrain aufgaben --done`), unter der Sperre der Automatik. */
+  /** [x] und ✅ heute (wie `2ndbrain aufgaben --done`) - auch waehrend die Engine laeuft (schreiben()). */
   private async completeInPlugin(path: string, line: number, text: string): Promise<CompleteResult> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!completable(path) || !(file instanceof TFile)) return { ok: false, grund: "Kein Punkt in einer Termin- oder Themen-Datei." };
     const today = localIsoDate();
     const check = completeInText(await this.app.vault.read(file), line, text, today);
     if (!check.ok || check.text === undefined) return { ok: check.ok, grund: check.grund, aktion: check.aktion };
-    if (!(await this.acquireAutoLock())) return { ok: false, grund: "Die Automatik läuft gerade – gleich noch einmal." };
-    try {
-      let result: CompleteResult = check;
-      await this.app.vault.process(file, (current) => {
-        result = completeInText(current, line, text, today);
-        return result.ok && result.text !== undefined ? result.text : current;
-      });
-      return { ok: result.ok, grund: result.grund, aktion: result.aktion };
-    } finally {
-      await this.releaseAutoLock();
-    }
+    let result: CompleteResult = check;
+    const weg = await this.schreiben(file, (current) => {
+      result = completeInText(current, line, text, today);
+      return result.ok && result.text !== undefined ? result.text : current;
+    });
+    if (weg === "warten") return { ok: false, grund: "Dieser Termin wird gerade nachbereitet – gleich noch einmal." };
+    return { ok: result.ok, grund: result.grund, aktion: result.aktion };
   }
 
   /** Sperre wie `auto.acquire_lock`: frei, wenn keine Datei da oder sie aelter als 30 min ist.

@@ -1918,10 +1918,11 @@ def t_mail_same_subject_same_day_gets_own_note():
         restore_vault()
 
 
-def t_auto_imports_mails_but_leaves_own_documents():
-    """Die Automatik liest Mails aus dem Vault-Ordner ein: die Mail wird Notiz, ihr Anhang wird
-    Notiz, die Mail kommt ins Archiv. Was du selbst ablegst (etwa PDF, ZIP), bleibt fuer
-    `2ndbrain einlesen` liegen."""
+def t_auto_imports_mails_and_inbox_files():
+    """Die Automatik liest den Eingang ein: die Mail wird Notiz, ihr Anhang wird Notiz, die Mail kommt
+    ins Archiv. Was du selbst in inbox/ ablegst, wird ebenso Notiz (das Original nach .attachments/);
+    was sich nicht lesen laesst, bleibt mit Grund liegen, ohne dass der Lauf scheitert. Was im
+    Vault-Ordner selbst liegt (etwa ein Handbuch), bleibt unberuehrt."""
     d = temp_vault()
     try:
         from email.message import EmailMessage
@@ -1941,17 +1942,106 @@ def t_auto_imports_mails_but_leaves_own_documents():
         eml.write_bytes(msg.as_bytes())
         eigenes = d / "Handbuch.txt"
         eigenes.write_text("Selbst abgelegt\n", encoding="utf-8", newline="\n")
+        vp.INBOX_DIR.mkdir(parents=True, exist_ok=True)
+        (vp.INBOX_DIR / "Notizen Portal.txt").write_text("Eigene Notizen zum Portal: Rampe pruefen.\n" * 3,
+                                                          encoding="utf-8", newline="\n")
+        alt = vp.INBOX_DIR / "Alt.doc"
+        alt.write_bytes(b"kein Word-Dokument")
         r = auto.run(only={"mails"}, llm_status=(False, "aus"))
         st = r["steps"][0]
-        ok(st["ok"] and st["changed"] == 1, st)
+        ok(st["ok"] and st["changed"] == 3, st)
         notes = sorted(f.name for f in vp.INBOX_DIR.glob("*.md"))
         ok("2026-09-22-protokoll-lenkungskreis.md" in notes, notes)
         anhang = [n for n in notes if "protokoll" in n and "lenkungskreis" not in n]
         eq(len(anhang), 1, f"Anhang-Notiz fehlt: {notes}")
         ok("Go-Live im Oktober" in (vp.INBOX_DIR / anhang[0]).read_text(encoding="utf-8"), "Anhang-Inhalt")
         ok(not eml.exists() and (vp.SOURCES_DIR / "emails" / "2026-09" / eml.name).is_file(), "Mail nicht archiviert")
-        ok(eigenes.is_file(), "selbst abgelegtes Dokument angefasst")
-        eq(auto.run(only={"mails"}, llm_status=(False, "aus"))["steps"][0]["detail"], "keine Mails im Eingang")
+        ok(any("Rampe pruefen" in (vp.INBOX_DIR / n).read_text(encoding="utf-8") for n in notes),
+           f"eigene Datei nicht eingelesen: {notes}")
+        ok(not (vp.INBOX_DIR / "Notizen Portal.txt").exists() and list((d / ".attachments").rglob("Notizen Portal.txt")),
+           "Original nicht nach .attachments/")
+        ok(alt.is_file() and "Alt.doc (altes Format, bitte als .docx speichern)" in st["detail"], st["detail"])
+        ok(eigenes.is_file(), "Datei im Vault-Ordner angefasst")
+        zweiter = auto.run(only={"mails"}, llm_status=(False, "aus"))["steps"][0]
+        eq((zweiter["ok"], zweiter["changed"]), (True, 0), f"zweiter Lauf: {zweiter}")
+        alt.unlink()
+        eq(auto.run(only={"mails"}, llm_status=(False, "aus"))["steps"][0]["detail"], "nichts im Eingang")
+    finally:
+        restore_vault()
+
+
+def t_nachbereiten_in_arbeit_und_waehrenddessen_geaendert():
+    """Waehrend das Modell einen Termin nachbereitet, steht er als in Arbeit (inarbeit.py) - das Plugin
+    schreibt andere Notizen weiter, diese erst danach. Aendert sich der Termin trotzdem, waehrend das
+    Modell rechnet (im Editor getippt), ueberschreibt die Nachbereitung nichts; in der Automatik bleibt
+    die Vormerkung fuer den naechsten Lauf."""
+    d = temp_vault()
+    import modell
+    orig = (modell.complete_json, modell.available)
+    try:
+        import vault_paths as vp
+        import inarbeit
+        import nachbereiten as nb
+        import auto
+        for mod in (inarbeit, nb, auto):
+            importlib.reload(mod)
+        m = d / "active-meetings"
+        m.mkdir(parents=True, exist_ok=True)
+        mitschrift = "Wir haben A beschlossen. Otto erledigt X bis Freitag. " * 6
+        eins, zwei = m / "2026-09-21 - review - Runde.md", m / "2026-09-22 - review - Runde.md"
+        for note, tag in ((eins, "21"), (zwei, "22")):
+            note.write_text(f"---\ntype: meeting\ntitle: Runde\ndate: '2026-09-{tag}'\n---\n## Mitschrift\n\n{mitschrift}\n",
+                            encoding="utf-8", newline="\n")
+        antwort = {"entscheidungen": [{"was": "A beschlossen", "wer": "", "datum": "", "thema": ""}],
+                   "actions": [], "kernteil": [], "parkplatz": []}
+        gesehen = []
+
+        def fake(messages, schema, **kw):
+            gesehen.append(inarbeit.aktuell())
+            return antwort, []
+        modell.complete_json, modell.available = fake, lambda *a, **k: (True, "test")
+        r = nb.process_note(eins, min_chars=30)
+        eq((gesehen[0], inarbeit.aktuell(), r["changed"]),
+           (["active-meetings/2026-09-21 - review - Runde.md"], [], True), "in Arbeit nur waehrend des Modells:")
+
+        def tippt(messages, schema, **kw):
+            zwei.write_text(zwei.read_text(encoding="utf-8") + "\nNachtrag im Editor.\n", encoding="utf-8", newline="\n")
+            return antwort, []
+        modell.complete_json = tippt
+        vp.update_frontmatter(zwei, {auto.WRAPUP_FLAG: auto.WRAPUP_REQUESTED})
+        auto.run(only={"nachbereiten"}, llm_status=(True, "test"))
+        text = zwei.read_text(encoding="utf-8")
+        ok("Nachtrag im Editor." in text and "## Entscheidungen" not in text, text)
+        eq((vp_read(zwei).get(auto.WRAPUP_FLAG), vp_read(zwei).get("status"), inarbeit.aktuell()),
+           (auto.WRAPUP_REQUESTED, None, []), "Vormerkung bleibt, nichts nachbereitet:")
+        eq(nb.process_note(zwei, dry_run=True, min_chars=30)["changed"] is not None and inarbeit.aktuell(), [],
+           "Probelauf markiert nichts")
+    finally:
+        modell.complete_json, modell.available = orig
+        restore_vault()
+
+
+def t_stand_haken_waehrend_des_modells_bleibt():
+    """Setzt jemand einen Haken in der Themen-Datei, waehrend das Modell den Stand schreibt (Plugin,
+    Editor), bleibt er: der Stand-Block kommt in den aktuellen Text."""
+    d = temp_vault()
+    try:
+        import stand as st
+        importlib.reload(st)
+        p = d / "entities" / "projects" / "p.md"
+        p.write_text("---\ntype: project\ntitle: P\nstatus: active\n---\n# P\n\n## Offene Punkte\n- [ ] Rampe pruefen\n\n"
+                     "## Event Log\n- [2026-09-14] [RISK] Freigaberunde blockiert Rollout\n", encoding="utf-8", newline="\n")
+
+        def hakt_ab(messages, schema, **kw):
+            p.write_text(p.read_text(encoding="utf-8").replace("- [ ] Rampe pruefen", "- [x] Rampe pruefen ✅ 2026-09-27"),
+                         encoding="utf-8", newline="\n")
+            return {"stand": "Die Freigaberunde blockiert den Rollout weiterhin, eine Loesung ist noch nicht in "
+                             "Sicht (Stand 2026-09-14).", "fremde_eintraege": []}, []
+
+        st.run(llm_call=hakt_ab, today=date(2026, 9, 27))
+        text = p.read_text(encoding="utf-8")
+        ok("- [x] Rampe pruefen ✅ 2026-09-27" in text and st.MARK_START in text
+           and "Die Freigaberunde blockiert den Rollout" in text, text)
     finally:
         restore_vault()
 
@@ -6091,8 +6181,11 @@ TESTS = [
      t_foreign_text_never_becomes_executable_code),
     ("Mail: gleicher Betreff am selben Tag - eigene Notiz je Mail, Anhang an seiner Mail",
      t_mail_same_subject_same_day_gets_own_note),
-    ("Automatik: Mails samt Anhaengen importieren, eigene Dokumente liegen lassen",
-     t_auto_imports_mails_but_leaves_own_documents),
+    ("Automatik: Mails samt Anhaengen und eigene Dateien aus inbox/ einlesen, Unlesbares liegen lassen, "
+     "Vault-Ordner unberuehrt", t_auto_imports_mails_and_inbox_files),
+    ("Nachbereiten: Termin in Arbeit waehrend des Modells, Aenderung in der Zeit wird nicht ueberschrieben",
+     t_nachbereiten_in_arbeit_und_waehrenddessen_geaendert),
+    ("Stand: ein Haken waehrend des Modells bleibt stehen", t_stand_haken_waehrend_des_modells_bleibt),
     ("Einarbeiten: Probelauf schreibt nichts, Modell -> Log/Aufgabe/Person/Rueckfrage/Archiv, Rueckgaengig",
      t_einarbeiten_probelauf_run_and_undo),
     ("Mail-Verlauf = ein Paket: neueste Mail, aeltere samt Anhaengen mitgebuendelt und abgeschlossen",

@@ -6,8 +6,8 @@ Aufgabenplanung). Jeder Schritt ist idempotent und billig, wenn sich nichts
 geaendert hat; teure Schritte haben ein Mindestintervall (.2ndbrain/daten/.auto_state.json).
 
   kalender  Kalender (iCal) nach archive/calendar/ (alle 6 h) deterministisch
-  mails     .eml im Root/inbox: Notiz, Anhaenge, Archiv       deterministisch
-            (ZIPs und Dokumente, die du selbst ablegst: `2ndbrain einlesen`)
+  mails     .eml im Root/inbox: Notiz, Anhaenge, Archiv; Dokumente, Bilder, ZIPs aus
+            inbox/ ebenso (Unlesbares bleibt liegen)           deterministisch
   protokolle Protokolle, Transkripte, Teams-Zusammenfassungen im Eingang in ihre Termin-
             Notiz (vorgemerkt zum Nachbereiten); unklar -> Rueckfrage   deterministisch
   einarbeiten  Eingang ins Vault einsortieren (einarbeiten.py)  LLM, erst nach Freigabe
@@ -35,7 +35,9 @@ Zwei Regeln:
   - Ohne Modell laeuft `nachbereiten` NICHT mit der Notloesung: die setzt den
     Fingerabdruck, und die Nachbereitung durch das Modell kaeme nie mehr. Der Schritt wartet.
 
-Sperre: .2ndbrain/daten/.auto.lock verhindert parallele Laeufe (Plugin + Aufgabenplanung).
+Sperre: .2ndbrain/daten/.auto.lock verhindert parallele Laeufe (Plugin + Aufgabenplanung). Das Plugin
+schreibt waehrenddessen weiter - nur nicht den Termin, den die Nachbereitung gerade haelt
+(.2ndbrain/daten/.in-arbeit.json, inarbeit.py).
 
     2ndbrain auto [--dry-run] [--json] [--only nachbereiten,stand] [--force]
     2ndbrain auto --only nachbereiten,themenlog,stand --note "active-meetings/.../x.md"
@@ -116,22 +118,29 @@ def step_kalender(ctx: dict) -> dict:
 
 
 def step_mails(ctx: dict) -> dict:
-    """Mails, die im Vault landen (Root oder inbox/): Notiz, Anhaenge auspacken und zu Notizen,
-    Mail archivieren - dieselben Stufen wie `2ndbrain einlesen`, aber nur fuer die Mails und ihre
-    Anhaenge. ZIPs und Dokumente, die du selbst ablegst, bleiben fuer `2ndbrain einlesen`."""
+    """Eingang: Mails (Root oder inbox/) werden Notizen samt ihren Anhaengen, die Mail kommt ins
+    Archiv - dieselben Stufen wie `2ndbrain einlesen`. Was du selbst in inbox/ ablegst (Dokumente,
+    Bilder, ZIPs), wird ebenso Notiz; das Original wandert nach .attachments/. Was sich nicht lesen
+    laesst, bleibt mit Grund liegen. Dateien im Vault-Ordner selbst (ausser Mails) bleiben unberuehrt."""
     import auspacken as co
     import dokumente as de
     import mails as ie
     import einlesen
-    mails = einlesen._inbox_files("*.eml")
-    if not mails:
-        return {"ok": True, "detail": "keine Mails im Eingang"}
-    if ctx["dry_run"]:
-        return {"ok": True, "detail": f"[DRY] {len(mails)} Mail(s) würden importiert"}
     inbox = vp.INBOX_DIR
+
+    def lesbar(f: Path) -> bool:
+        sfx = f.suffix.lower()
+        return f.is_file() and (sfx in co.ARCHIVE_SUFFIXES or (sfx in de.SUPPORTED_EXTENSIONS and sfx != ".md"))
+
+    mails = einlesen._inbox_files("*.eml")
+    eigene = [f for f in sorted(inbox.iterdir()) if lesbar(f)] if inbox.is_dir() else []
+    if not mails and not eigene:
+        return {"ok": True, "detail": "nichts im Eingang"}
+    if ctx["dry_run"]:
+        return {"ok": True, "detail": f"[DRY] {len(mails)} Mail(s), {len(eigene)} Datei(en) würden eingelesen"}
     inbox.mkdir(parents=True, exist_ok=True)
-    vorher = set(inbox.iterdir())
-    fehler, archiviert, doppelt = [], 0, 0
+    vorher = set(inbox.iterdir()) - set(eigene)     # die eigenen Dateien kommen mit den Anhaengen dran
+    fehler, archiviert, doppelt, liegen = [], 0, 0, []
     for m in mails:
         try:
             if ie.process_eml(str(m), str(inbox), keep_source=True) is None:   # schon eingelesen
@@ -143,7 +152,7 @@ def step_mails(ctx: dict) -> dict:
                 archiviert += 1
         except Exception as e:                  # eine kaputte Mail haelt die anderen nicht auf
             fehler.append(f"{m.name}: {type(e).__name__}")
-    # Anhaenge: ZIPs auspacken, Dokumente zu Notizen (eine zweite Runde fuer ZIP-Inhalte)
+    # Anhaenge und eigene Dateien: ZIPs auspacken, Dokumente zu Notizen (weitere Runden fuer ZIP-Inhalte)
     erledigt, dokumente = set(), 0
     for _ in range(3):
         neu = [f for f in sorted(inbox.iterdir()) if f.is_file() and f not in vorher and f not in erledigt]
@@ -160,16 +169,25 @@ def step_mails(ctx: dict) -> dict:
                     de.process_inbox_document(f, str(vp.VAULT))
                     dokumente += 1
             except Exception as e:
-                fehler.append(f"{f.name}: {type(e).__name__}")
+                if f in eigene:                 # wie `einlesen`: bleibt liegen, mit Grund
+                    alt = de.ALTE_OFFICE.get(sfx)
+                    grund = f"altes Format, bitte als {alt} speichern" if alt else type(e).__name__
+                    liegen.append(f"{f.name} ({grund})")
+                else:
+                    fehler.append(f"{f.name}: {type(e).__name__}")
     neu = len(mails) - doppelt
-    detail = f"{neu} Mail(s) importiert, {dokumente} Anhang-Notiz(en)"
+    teile = [f"{neu} Mail(s) importiert"] if mails else []
+    teile.append(f"{dokumente} Notiz(en) aus Anhängen und Dateien")
+    detail = ", ".join(teile)
     if doppelt:
         detail += f", {doppelt} schon eingelesen (Papierkorb)"
     if archiviert < neu:
         detail += f", {neu - archiviert} Mail(s) bleiben im Eingang"
+    if liegen:
+        detail += " – nicht lesbar, bleibt liegen: " + "; ".join(liegen[:3])
     if fehler:
         detail += " – Fehler: " + "; ".join(fehler[:3])
-    return {"ok": not fehler, "detail": detail, "changed": len(mails)}
+    return {"ok": not fehler, "detail": detail, "changed": len(mails) + dokumente}
 
 
 def step_einarbeiten(ctx: dict) -> dict:
@@ -258,15 +276,18 @@ def step_nachbereiten(ctx: dict) -> dict:
         last = str(r.get("status", ""))
         if nachbereiten.by_model(r):
             done.append(r)
-        if vorgemerkt and not ctx["dry_run"]:
-            # Vormerkung erledigt; ohne Material bleibt ein Hinweis statt einer Dauer-Vormerkung
+        if vorgemerkt and not ctx["dry_run"] and last != nachbereiten.GEAENDERT:
+            # Vormerkung erledigt; ohne Material bleibt ein Hinweis statt einer Dauer-Vormerkung.
+            # Waehrenddessen geaendert: sie bleibt - der naechste Lauf nimmt das Neue mit.
             vp.update_frontmatter(path, {WRAPUP_FLAG: "zu wenig Text" if last == "kein Material" else None})
     ctx["wrapped"] = done
     detail = f"{len(done)} Notiz(en) nachbereitet"
     if ctx.get("note") and not done:
         # Eine Notiz auf Ansage: sagen, warum nichts passiert ist
         detail = {"kein Material": "zu wenig Text zum Nachbereiten",
-                  "unveraendert": "unverändert seit der letzten Nachbereitung"}.get(last, last)
+                  "unveraendert": "unverändert seit der letzten Nachbereitung",
+                  nachbereiten.GEAENDERT: "die Notiz wurde während der Nachbereitung geändert – "
+                                          "nichts überschrieben, bitte noch einmal nachbereiten"}.get(last, last)
     return {"ok": True, "detail": detail, "changed": len(done)}
 
 
