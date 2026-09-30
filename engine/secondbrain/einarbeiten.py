@@ -47,7 +47,7 @@ PREFIXES = ("[STATUS]", "[MILESTONE]", "[DEADLINE]", "[RISK]", "[DECISION]", "[A
 PACKET_KEYS = ("title", "meeting_date", "absender", "rundmail", "meeting_text", "attachments", "parent_context",
                "resolved_dates", "attendees", "all_wikilinks", "project_arrows", "deterministic", "known_projects",
                "known_entity_slugs", "relevant_aliases", "entity_candidates")
-RUNDMAIL_AB = 15            # so viele Empfaenger: Rundmail (Ankuendigung an viele)
+# Rundmail (Ankuendigung an viele, oder an einen Verteiler): das Feld `rundmail` der Mail (adressen.py)
 
 SYSTEM = (
     "Du arbeitest eine Eingangs-Notiz (Mail mit Anhängen, Dokument, Transkript) in einen "
@@ -214,15 +214,12 @@ _KONTEXT: dict = {}
 
 
 def _kontext() -> dict:
-    """Je Lauf einmal: Personen nach Mail-Adresse und Name, Themen je Person (`beteiligte`)."""
+    """Je Lauf einmal: die Personen (adressen.Personen: Mail-Adresse, Name, Alias), Themen je Person
+    (`beteiligte`)."""
     if _KONTEXT:
         return _KONTEXT
-    personen, themen = {}, {}
-    for f in sorted(vp.PEOPLE_DIR.glob("*.md")) if vp.PEOPLE_DIR.is_dir() else []:
-        fm = vp.read_frontmatter_head(f)
-        for key in (str(fm.get("email") or "").strip().lower(), " ".join(str(fm.get("name") or "").split()).lower()):
-            if key:
-                personen.setdefault(key, f.stem)
+    import adressen
+    personen, themen = adressen.Personen(), {}
     for d in (vp.PROJECTS_DIR, vp.FORUMS_DIR):
         for f in sorted(d.glob("*.md")) if d.is_dir() else []:
             for b in vp.read_frontmatter(f).get("beteiligte") or []:
@@ -250,17 +247,22 @@ def _mit_absender(pkt: dict) -> dict:
     fm = _mail_fm(Path(pkt["path"]))
     if str(fm.get("type", "")) != "email-thread":
         return pkt
-    m = re.match(r"\s*\"?(.*?)\"?\s*<([^>]+)>", str(fm.get("from") or ""))
-    name, adresse = (m.group(1), m.group(2)) if m else (str(fm.get("from") or ""), "")
+    import adressen
+    von = str(fm.get("von") or "")
     k = _kontext()
-    slug = k["personen"].get(adresse.strip().lower()) or k["personen"].get(" ".join(name.split()).lower())
+    slug = adressen.link_slug(von)
+    if slug:
+        name = k["personen"].namen_von.get(slug, slug)
+    else:
+        name, adresse = adressen.name_adresse(von)
+        slug = k["personen"].finde(name, adresse)
     absender = {"name": " ".join(name.split())}
     if slug:
         pfm = vp.read_frontmatter_head(vp.PEOPLE_DIR / f"{slug}.md")
         absender.update({"slug": slug, **{f: str(pfm[f]) for f in ("role", "team", "bereich")
                                           if pfm.get(f) and str(pfm[f]) != "Unbekannt"},
                          "themen": sorted(set(k["themen"].get(slug, [])))})
-    return {**pkt, "absender": absender, "rundmail": len(fm.get("participants") or []) > RUNDMAIL_AB}
+    return {**pkt, "absender": absender, "rundmail": bool(fm.get("rundmail"))}
 
 
 def _pruefe_themen(payload: dict, pkt: dict) -> dict:
@@ -448,6 +450,11 @@ def apply(pkt: dict, payload: dict) -> dict:
     neu = sorted(Path(r).stem for r in created if r.startswith("entities/"))
     with contextlib.redirect_stdout(io.StringIO()):
         res = mm.done(source, notes=payload["notes"] or "eingearbeitet", created=neu, updated=themen)
+    if res and str(vp.read_frontmatter_head(vp.VAULT / res["destination"]).get("type") or "") == "email-thread":
+        # die Mail zeigt auf ihre Themen und auf Personen, die dieses Paket erst angelegt hat
+        import adressen
+        import nachziehen
+        nachziehen.mail(vp.VAULT / res["destination"], adressen.Personen())
     moves = [res] + (res.get("bundled") or []) if res else []
     notes = [{"from": rel, "to": m["destination"], "before": notes_before.get(rel, "")}
              for m in moves for rel in notes_before if Path(rel).name == m["file"]]

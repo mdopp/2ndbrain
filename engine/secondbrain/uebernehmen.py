@@ -71,6 +71,35 @@ def mark_applied(h: str) -> None:
     PROCESSED_LOG.write_text("\n".join(seen) + "\n", encoding="utf-8", newline="\n")
 
 
+def _absender(source_file: str) -> tuple[str | None, str]:
+    """Absender einer Mail-Quelle: (Slug oder None, wie er im Text steht) - ("", "") fuer Termine, fuer
+    Mails ohne Absender und fuer eigene Mails (die sind "von mir")."""
+    if not source_file:
+        return None, ""
+    p = Path(source_file) if Path(source_file).is_absolute() else VAULT / source_file
+    fm = vp.read_frontmatter_head(p) if p.is_file() else {}
+    if str(fm.get("type") or "") != "email-thread" or not str(fm.get("von") or "").strip():
+        return None, ""
+    import adressen
+    von = str(fm["von"]).strip()
+    slug = adressen.link_slug(von)
+    if slug and slug == vp.ich():
+        return None, ""
+    return slug, von if slug else adressen.name_adresse(von)[0]
+
+
+def _mit_absender(text: str, absender: tuple[str | None, str], wie: str) -> str:
+    """"Text (laut X)" / "Text (von X)" - ausser der Text nennt X schon (Slug oder Name)."""
+    slug, wer = absender
+    if not wer:
+        return text
+    import adressen
+    name = wer.split("|", 1)[1].rstrip("]") if slug and "|" in wer else wer
+    if (slug and slug in text) or adressen.fold(name) in adressen.fold(text):
+        return text
+    return f"{text} ({wie} {wer})"
+
+
 def _append_events(content: str, entries: list[str]) -> str:
     """Events oben in den Event-Log einhaengen (append-only, Sektion bei Bedarf anlegen)."""
     if not entries:
@@ -94,6 +123,7 @@ def apply_project_updates(updates, dry_run: bool = False, source_file: str = "")
     today = date.today().isoformat()
     event_date = vp.source_date(source_file, fallback=today)
     suffix = f" (→ [[{Path(source_file).stem}]])" if source_file else ""
+    absender = _absender(source_file)              # aus einer Mail: wer es gesagt hat
     touched = []
     for upd in updates:
         slug = upd.get("slug")
@@ -102,7 +132,7 @@ def apply_project_updates(updates, dry_run: bool = False, source_file: str = "")
             print(f"[SKIP] Projekt '{slug}' existiert nicht ({fpath.relative_to(VAULT)})")
             continue
 
-        entries = [f"- [{event_date}] {e}{suffix}" for e in upd.get("events", [])]
+        entries = [f"- [{event_date}] {_mit_absender(e, absender, 'laut')}{suffix}" for e in upd.get("events", [])]
         content = fpath.read_text(encoding="utf-8")
         archived = verdichten.archived_text(fpath.stem)
         new_content = _append_events(content, [e for e in entries
@@ -304,6 +334,7 @@ def apply_action_items(actions, dry_run: bool = False, source_file: str = "") ->
     Datum ist das der Quelle, nicht des Laufs."""
     created = vp.source_date(source_file, fallback=date.today().isoformat())
     source = Path(source_file).stem if source_file else None
+    absender = _absender(source_file)              # aus einer Mail: wer darum gebeten hat
     names = tk.Names()
     for act in actions:
         fpath = vp.project_path(act.get("project"))
@@ -311,8 +342,12 @@ def apply_action_items(actions, dry_run: bool = False, source_file: str = "") ->
             print(f"[SKIP] Action ohne Projektdatei: {act.get('project')}")
             continue
         deadline = str(act.get("deadline") or "").strip()
-        task = tk.Task(status=" ", text=" ".join(str(act.get("task", "")).split()),
-                       owner=str(act.get("owner") or "").strip() or None,
+        owner = str(act.get("owner") or "").strip() or None
+        text = " ".join(str(act.get("task", "")).split())
+        if not (owner and absender[0] and owner == absender[0]):     # "von X" nicht bei Xs eigener Zusage
+            text = _mit_absender(text, absender, "von")
+        task = tk.Task(status=" ", text=text,
+                       owner=owner,
                        due=deadline if re.match(r"^\d{4}-\d{2}-\d{2}$", deadline) else None,
                        created=created, source=source)
         content = fpath.read_text(encoding="utf-8")

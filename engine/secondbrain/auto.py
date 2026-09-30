@@ -8,6 +8,8 @@ geaendert hat; teure Schritte haben ein Mindestintervall (.2ndbrain/daten/.auto_
   kalender  Kalender (iCal) nach archive/calendar/ (alle 6 h) deterministisch
   mails     .eml im Root/inbox: Notiz, Anhaenge, Archiv; Dokumente, Bilder, ZIPs aus
             inbox/ ebenso (Unlesbares bleibt liegen)           deterministisch
+  nachziehen alte Notizen auf den Stand der Engine (Mails: Absender, Empfaenger,
+            Verteiler als Verweise; nachziehen.py) - je Lauf ein Stueck  deterministisch
   protokolle Protokolle, Transkripte, Teams-Zusammenfassungen im Eingang in ihre Termin-
             Notiz (vorgemerkt zum Nachbereiten); unklar -> Rueckfrage   deterministisch
   einarbeiten  Eingang ins Vault einsortieren (einarbeiten.py)  LLM, erst nach Freigabe
@@ -65,7 +67,8 @@ INTERVAL_MIN = {"kalender": 360, "mails": 0, "protokolle": 0, "einarbeiten": 0, 
                 "nachbereiten": 0, "themenlog": 0,
                 "rueckfragen": 0, "schreibweisen": 0, "altbestand": 0, "archivieren": 0, "verdichten": 43200, "stand": 0,
                 "systemuebersicht": 1440, "personen": 1440}
-ORDER = ("kalender", "mails", "protokolle", "einarbeiten", "wissen", "vorbereiten", "nachbereiten", "themenlog", "rueckfragen",
+ORDER = ("kalender", "mails", "nachziehen", "protokolle", "einarbeiten", "wissen", "vorbereiten", "nachbereiten",
+         "themenlog", "rueckfragen",
          "schreibweisen", "altbestand", "archivieren",
          "verdichten",
          "stand", "systemuebersicht", "personen")
@@ -188,6 +191,18 @@ def step_mails(ctx: dict) -> dict:
     if fehler:
         detail += " – Fehler: " + "; ".join(fehler[:3])
     return {"ok": not fehler, "detail": detail, "changed": len(mails) + dokumente}
+
+
+def step_nachziehen(ctx: dict) -> dict:
+    """Alte Notizen auf den Stand der Engine bringen (nachziehen.py) - je Lauf ein Stueck, im Hintergrund."""
+    import nachziehen
+    r = nachziehen.run(dry_run=ctx["dry_run"])
+    if not r["gesamt"]:
+        return {"ok": True, "detail": "keine Mails"}
+    detail = f"Mails: {r['nachgezogen']} nachgezogen" + (f", {r['offen']} offen" if r["offen"] else "")
+    if r["fehler"]:
+        detail += " – Fehler: " + "; ".join(r["fehler"][:3])
+    return {"ok": not r["fehler"], "detail": detail, "changed": r["nachgezogen"]}
 
 
 def step_einarbeiten(ctx: dict) -> dict:
@@ -392,7 +407,7 @@ def step_personen(ctx: dict) -> dict:
     return {"ok": True, "detail": f"{r.get('written', 0)} Person(en) aktualisiert"}
 
 
-STEPS = {"kalender": step_kalender, "mails": step_mails, "protokolle": step_protokolle,
+STEPS = {"kalender": step_kalender, "mails": step_mails, "nachziehen": step_nachziehen, "protokolle": step_protokolle,
          "einarbeiten": step_einarbeiten, "wissen": step_wissen, "vorbereiten": step_vorbereiten,
          "nachbereiten": step_nachbereiten, "themenlog": step_themenlog, "rueckfragen": step_rueckfragen, "schreibweisen": step_schreibweisen,
          "altbestand": step_altbestand, "archivieren": step_archivieren, "verdichten": step_verdichten,

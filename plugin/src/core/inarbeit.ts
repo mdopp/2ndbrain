@@ -28,3 +28,24 @@ export function schreibweg(pfad: string, sperreFrei: boolean, inArbeitPfade: str
   if (sperreFrei) return "sperren";
   return inArbeitPfade.includes(pfad) ? "warten" : "sofort";
 }
+
+/** Stand des Nachziehens (engine/secondbrain/nachziehen.py): alte Notizen, die die Automatik nach einem
+ *  Update im Hintergrund auf den neuen Stand bringt - je Aufbereitung, was noch offen ist. */
+export const NACHZIEHEN = ".2ndbrain/daten/nachziehen.json";
+export interface Nachziehen { name: string; offen: number; gesamt: number }
+
+export function nachziehenOffen(inhalt: string | null): Nachziehen[] {
+  try {
+    const j = JSON.parse(inhalt ?? "") as Record<string, { offen?: unknown; gesamt?: unknown } | null>;
+    return Object.entries(j ?? {}).map(([name, v]) => ({ name, offen: Number(v?.offen) || 0, gesamt: Number(v?.gesamt) || 0 }))
+      .filter((x) => x.offen > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** „Mails 12 von 40“ - fuer die Statuszeile in Heute. */
+export function nachziehenText(offen: Nachziehen[]): string {
+  const namen: Record<string, string> = { mail: "Mails" };
+  return offen.map((x) => `${namen[x.name] ?? x.name} ${x.offen} von ${x.gesamt}`).join(", ");
+}

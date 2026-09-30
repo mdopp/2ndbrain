@@ -22,7 +22,7 @@ export interface WerkzeugErgebnis {
   schritt: string;
 }
 
-const ARTEN = ["Person", "Thema", "Termin", "System", "Team", "Firma", "Begriff", "Reihe", "Quelle", "Eingang",
+const ARTEN = ["Person", "Thema", "Termin", "Mail", "System", "Team", "Firma", "Begriff", "Reihe", "Quelle", "Eingang",
                "Subdomäne", "Kontext", "Nachricht", "Fachobjekt", "Ablauf", "Externer", "Beziehung", "Atlas-Team"];
 
 export const WERKZEUGE: WerkzeugSpec[] = [

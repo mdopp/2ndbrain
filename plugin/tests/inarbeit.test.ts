@@ -2,7 +2,7 @@
 // gerade nachbereitet (core/nacherfassen.ts: Wartend, anwenden, vormerken). Namen erfunden.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { IN_ARBEIT_MAX_MS, inArbeit, schreibweg } from "../src/core/inarbeit";
+import { IN_ARBEIT_MAX_MS, inArbeit, nachziehenOffen, nachziehenText, schreibweg } from "../src/core/inarbeit";
 import { NOTES_HEADING, Wartend, anwenden, vormerken } from "../src/core/nacherfassen";
 
 const A = "active-meetings/2026-09-30 - checkin - Portal.md";
@@ -22,6 +22,13 @@ test("Schreibweg: Sperre frei → kurz sperren; Engine läuft → andere Notiz s
   assert.equal(schreibweg(B, false, [A]), "sofort", "Engine bereitet A nach – B wird trotzdem geschrieben");
   assert.equal(schreibweg(B, false, []), "sofort", "Automatik läuft, arbeitet an keinem Termin");
   assert.equal(schreibweg(A, false, [A]), "warten", "genau der Termin, den die Engine gerade schreibt");
+});
+
+test("Nachziehen: Stand der Engine lesen – nur was offen ist, kaputt oder fehlend heißt nichts offen", () => {
+  const datei = JSON.stringify({ mail: { fassung: 2, gesamt: 40, offen: 12 }, fertig: { fassung: 1, gesamt: 5, offen: 0 } });
+  assert.deepEqual(nachziehenOffen(datei), [{ name: "mail", offen: 12, gesamt: 40 }]);
+  assert.equal(nachziehenText(nachziehenOffen(datei)), "Mails 12 von 40");
+  assert.deepEqual([nachziehenOffen("{kaputt"), nachziehenOffen(null)], [[], []]);
 });
 
 test("Warteliste: Notizen sammeln sich, ein Schalter ersetzt den vorigen, anwenden wie sofort", () => {

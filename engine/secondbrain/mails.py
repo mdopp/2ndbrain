@@ -25,7 +25,8 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import fremdtext  # noqa: E402 - Pfad erst gesetzt
+import adressen  # noqa: E402 - Pfad erst gesetzt
+import fremdtext  # noqa: E402
 
 
 # --- Configuration ---
@@ -385,6 +386,22 @@ def note_stem(headers, dirs):
     return kandidaten[-1]
 
 
+def _kopf_zeilen(kopf: dict) -> list[str]:
+    """Frontmatter-Zeilen fuer Absender und Empfaenger (adressen.felder) - Listen vollstaendig, je Eintrag
+    YAML-sicher."""
+    def liste(key, werte):
+        return f'{key}: [' + ', '.join(f'"{_fm_safe(w, limit=300)}"' for w in werte) + ']'
+    zeilen = [f'von: "{_fm_safe(kopf["von"], limit=300)}"', liste("an", kopf["an"])]
+    for key in ("cc", "verteiler"):
+        if kopf[key]:
+            zeilen.append(liste(key, kopf[key]))
+    zeilen.append(liste("teilnehmer", kopf["teilnehmer"]))
+    if kopf["rundmail"]:
+        zeilen.append("rundmail: true")
+    zeilen.append(f"mail_fassung: {adressen.MAIL_FASSUNG}")
+    return zeilen
+
+
 def generate_vault_note(headers, body, participants, attachments, stem=None):
     """Generate vault-friendly Markdown from email data (`stem`: Dateiname aus note_stem)."""
     date_str = format_date(headers.get('date', ''))
@@ -412,11 +429,9 @@ def generate_vault_note(headers, body, participants, attachments, stem=None):
     if headers.get('message_id'):
         lines.append(f'message_id: "{_fm_safe(headers.get("message_id"))}"')
     lines.append(f'last_updated: {datetime.now().strftime("%Y-%m-%d")}')
-    lines.append(f'from: "{_fm_safe(headers.get("from"))}"')
-    lines.append(f'to: "{_fm_safe(headers.get("to"))}"')
-    if headers.get('cc'):
-        lines.append(f'cc: "{_fm_safe(headers.get("cc"))}"')
-    lines.append('participants: [' + ', '.join(f'"{_fm_safe(x)}"' for x in participants) + ']')
+    # Absender und Empfaenger vollstaendig, als Verweise auf die Personenseiten (adressen.py)
+    kopf = adressen.felder(headers.get("from") or "", headers.get("to") or "", headers.get("cc") or "")
+    lines.extend(_kopf_zeilen(kopf))
     lines.append(f'has_attachment: {headers.get("has_attachment", "no")}')
     lines.append(f'---')
     lines.append('')
@@ -428,10 +443,6 @@ def generate_vault_note(headers, body, participants, attachments, stem=None):
     if headers.get('cc'):
         lines.append(f'**CC:** {decode_mime_header(headers.get("cc"))}')
     lines.append('')
-
-    if participants:
-        lines.append(f'**Participants:** {", ".join(participants)}')
-        lines.append('')
 
     if summary:
         # Jede Zeile zitieren und entschaerfen: das ist Mailtext. Eine ungequotete Folgezeile

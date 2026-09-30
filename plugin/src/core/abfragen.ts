@@ -18,7 +18,7 @@ import { normalizeTitle, seriesKey } from "./titel";
 export interface AbfrageKontext { g: Graph; src: VaultSource; today: string; me: string }
 export interface AbfrageErgebnis { text: string; schritt: string }
 
-const ARTEN = ["Person", "Thema", "Termin", "System", "Team", "Firma", "Begriff", "Reihe", "Quelle", "Eingang"];
+const ARTEN = ["Person", "Thema", "Termin", "Mail", "System", "Team", "Firma", "Begriff", "Reihe", "Quelle", "Eingang"];
 const LOG_ARTEN: Record<string, string> = { risiko: "RISK", beschluss: "DECISION", entscheidung: "DECISION",
                                             status: "STATUS", meilenstein: "MILESTONE", frist: "DEADLINE" };
 const LOG_NAMEN: Record<string, string> = { RISK: "Risiko", DECISION: "Beschluss", STATUS: "Status",

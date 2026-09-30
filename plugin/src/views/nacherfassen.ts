@@ -49,13 +49,14 @@ export class CaptureModal extends Modal {
     }
 
     this.material = materialText(await this.app.vault.adapter.read(m.path));
-    if (this.material) {
+    if (this.material) {                         // offen: sonst sah es aus, als stuende nichts in der Notiz
       const det = el.createEl("details", { cls: "sb-material" });
-      det.createEl("summary", { text: `Schon in der Notiz: ${this.material.length} Zeichen (Teams, Notizen)` });
+      det.open = true;
+      det.createEl("summary", { text: `Schon in der Notiz – wird mit nachbereitet (${this.material.length} Zeichen)` });
       det.createEl("pre", { text: this.material });
     }
 
-    el.createDiv({ cls: "sb-label", text: this.material ? "Ergänzen" : "Deine Notizen" });
+    el.createDiv({ cls: "sb-label", text: this.material ? "Ergänzen (optional – leer lassen genügt)" : "Deine Notizen" });
     this.area = el.createEl("textarea", {
       attr: { rows: "10", placeholder: "Stichpunkte reichen, z. B.\nEntscheidung: Englisch als Arbeitssprache im Atlas\n"
         + "Ines: Begriffsliste liefern bis 2.10.\nOffen: Wer entscheidet über das Routing?" },

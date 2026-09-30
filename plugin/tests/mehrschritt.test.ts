@@ -113,6 +113,27 @@ test("Graph: Wege meiden dich selbst und Berichte; Umkreis nach Art, ohne dich",
                    ["Checkin Portal (10.09.2026)", "Checkin Portal (01.08.2026)"]);
 });
 
+test("Mails im Graphen: eigene Art, Kanten von/an/in Kopie – Umkreis einer Person findet ihre Mails", async () => {
+  const src = new MemorySource({
+    "entities/people/anna-berg.md": "---\ntype: person\nname: Anna Berg\n---\n",
+    "entities/people/karl-kurz.md": "---\ntype: person\nname: Karl Kurz\n---\n",
+    "entities/projects/portal.md": "---\ntype: project\ntitle: Portal\n---\n",
+    "archive/meetings/2026-09/2026-09-22-portal-frage.md": "---\ntype: email-thread\ntitle: Portal Frage\n"
+      + "von: '[[anna-berg|Anna Berg]]'\nan:\n- '[[karl-kurz|Karl Kurz]]'\n- Fremd Person <f.p@firma.example>\n"
+      + "themen: [portal]\n---\n# Portal Frage\n",
+    "archive/meetings/2026-09/2026-09-21 - checkin - Portal.md": "---\ntype: meeting\ntitle: Checkin Portal\n"
+      + "date: '2026-09-21'\nthemen: [portal]\n---\n",
+  });
+  const g = await baueGraph(src);
+  const mail = g.knoten.get("archive/meetings/2026-09/2026-09-22-portal-frage.md");
+  assert.deepEqual([mail?.art, mail?.name], ["Mail", "Portal Frage (22.09.2026)"]);
+  assert.equal(g.knoten.get("archive/meetings/2026-09/2026-09-21 - checkin - Portal.md")?.art, "Termin", "Termine bleiben Termine");
+  assert.deepEqual([g.kante(mail!.id, "entities/people/anna-berg.md")?.wie, g.kante(mail!.id, "entities/people/karl-kurz.md")?.wie],
+                   ["von", "an"]);
+  const um = await fuehreAus("neighbors", { von: "Anna Berg", art: "Mails" }, g, src);
+  assert.ok(um.text.includes("Portal Frage (22.09.2026)") && !um.text.includes("Checkin Portal"), um.text);
+});
+
 test("Werkzeuge: search über alles, read mit Gliederung und Abschnitt, Atlas, System mit Verbindungen", async () => {
   const src = vault();
   const g = await baueGraph(src, "ich-selbst");

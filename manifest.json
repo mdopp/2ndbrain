@@ -1,7 +1,7 @@
 {
   "id": "2ndbrain",
   "name": "2ndBrain",
-  "version": "0.11.3",
+  "version": "0.12.0",
   "minAppVersion": "1.11.4",
   "description": "Tagesstart, Aufgaben, Risiken, Sofortsuche, Nacherfassen und Chat für einen Arbeits-Vault – am Handy lesen und erfassen, am Desktop dazu die Python-Engine und ein lokales LLM.",
   "author": "Michael Dopp",

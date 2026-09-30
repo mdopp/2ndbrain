@@ -37,6 +37,7 @@ export interface Kante { von: string; wie: string }
 const FELDER: Record<string, string> = {
   parent: "Oberthema", bereich: "Bereich", themen: "Thema", series: "Reihe", forum: "Reihe", reports_on: "berichtet an",
   teilnehmer: "Teilnehmer", key_persons: "Teilnehmer", mit: "mit", beteiligte: "Beteiligte",
+  von: "von", an: "an", cc: "in Kopie",
   beteiligte_unterthemen: "Beteiligte (Unterthema)", verantwortlich: "Verantwortlich", rollen: "Rolle",
   owner: "Owner", owner_team: "Owner", lead: "Leitung", team: "Team", systems: "System", ersetzt: "löst ab",
   verbindungen: "Verbindung", atlas_id: "im Atlas", atlas_kontexte: "setzt um", firma: "Firma",
@@ -59,7 +60,8 @@ const KEINE_HUBS = new Set(["Bericht", "Übersicht", "Verzeichnis", "Vorlage"]);
 /** Gleichnamiges („Lagerwesen“ als Thema, Begriff, Subdomäne, Team) ist ein Punkt mit mehreren
  *  Auspraegungen; gelesen wird zuerst diese Art. */
 const VORRANG = ["Thema", "System", "Person", "Kontext", "Subdomäne", "Firma", "Team", "Reihe", "Atlas-Team",
-                 "Fachobjekt", "Begriff", "Nachricht", "Ablauf", "Externer", "Beziehung", "Termin", "Quelle", "Eingang"];
+                 "Fachobjekt", "Begriff", "Nachricht", "Ablauf", "Externer", "Beziehung", "Termin", "Mail", "Quelle",
+                 "Eingang"];
 const vorrang = (art: string) => (VORRANG.includes(art) ? VORRANG.indexOf(art) : VORRANG.length);
 
 /** Name ohne Klammer-Zusatz: „Lagerwesen (Bereich)“ -> „Lagerwesen“. */
@@ -73,6 +75,7 @@ export const ARTEN_FILTER: Record<string, string> = {
   projekte: "Thema", system: "System", systeme: "System", team: "Team", teams: "Team", firma: "Firma",
   firmen: "Firma", begriff: "Begriff", begriffe: "Begriff", glossar: "Begriff", reihe: "Reihe", reihen: "Reihe",
   termin: "Termin", termine: "Termin", meeting: "Termin", meetings: "Termin", quelle: "Quelle", quellen: "Quelle",
+  mail: "Mail", mails: "Mail", email: "Mail", emails: "Mail",
   kontext: "Kontext", kontexte: "Kontext", subdomaene: "Subdomäne", subdomaenen: "Subdomäne",
   nachricht: "Nachricht", nachrichten: "Nachricht", fachobjekt: "Fachobjekt", fachobjekte: "Fachobjekt",
   objekt: "Fachobjekt", objekte: "Fachobjekt", ablauf: "Ablauf", ablaeufe: "Ablauf", prozess: "Ablauf",
@@ -359,7 +362,7 @@ export class Graph {
     const art = opts.art ?? null;
     // Termine und Quellen: die direkt verbundenen zuerst, darin die neuesten („der letzte Termin zu X“);
     // sonst nach Naehe und Zahl der Verbindungen
-    const nachDatum = art === "Termin" || art === "Quelle";
+    const nachDatum = art === "Termin" || art === "Mail" || art === "Quelle";
     const direkt = (id: string) => (nachDatum && naehe.get(id) === 1 ? 0 : 1);
     const datum = (id: string) => (nachDatum ? this.knoten.get(id)?.datum ?? "" : "");
     return [...punkte.entries()]
@@ -396,10 +399,13 @@ function ziele(v: unknown): string[] {
 }
 
 function notizKnoten(pfad: string, fm: Frontmatter): Knoten {
-  const art = artVon(pfad);
+  // Mails liegen bei den Terminen (archive/meetings) oder im Eingang - sie sind aber Mails
+  const art = str(fm.type) === "email-thread" ? "Mail" : artVon(pfad);
   let name = strip(str(fm.name) || str(fm.title) || str(fm.term) || stem(pfad));
   const datum = /^\d{4}-\d{2}-\d{2}/.exec(str(fm.date))?.[0] ?? /^\d{4}-\d{2}-\d{2}/.exec(stem(pfad))?.[0];
-  if (art === "Termin" && datum && !name.includes(datum) && !name.includes(datumDe(datum))) name = `${name} (${datumDe(datum)})`;
+  if ((art === "Termin" || art === "Mail") && datum && !name.includes(datum) && !name.includes(datumDe(datum))) {
+    name = `${name} (${datumDe(datum)})`;
+  }
   const namen = [stem(pfad), str(fm.name), str(fm.title), grundname(str(fm.name) || str(fm.title)), str(fm.term),
                  ...asList(fm.aliases).map((a) => str(a))]
     .map((x) => norm(x)).filter((x) => x.length >= 2);

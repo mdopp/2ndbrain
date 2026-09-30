@@ -204,6 +204,26 @@ Ein Protokoll ohne passenden Termin bleibt fürs Einarbeiten (es kann auch ein a
 bzw. die Automatik ein: Mail → Notiz, Anhänge und ZIPs → eigene Notizen, Bilder → Texterkennung. Die
 Automatik nimmt aus der Vault-Wurzel nur Mails; Dokumente, Bilder und ZIPs nur aus `inbox/` (was im
 Vault-Ordner selbst liegt, gehört dem Nutzer). Einsortiert wird danach je Lauf nur `je_lauf` Vorgänge.
+
+**Absender und Empfänger** sind Quellen für Namen, Beteiligte und das Wiederfinden (`adressen.py`): Die
+Mail-Notiz trägt `von`, `an`, `cc` vollständig, jede Person als Verweis auf ihre Seite – erkannt über die
+Mail-Adresse der Seite (`email:`), den vollen Namen, einen Alias, „Nachname, Vorname“, die umgekehrte
+Reihenfolge, Initialen am Vornamen oder vorname.nachname@; ein Name, der auf mehrere Seiten passt, bleibt
+Klartext. Gruppen-Adressen stehen unter `verteiler`. `teilnehmer` sind die erkannten Personen aus Von und An –
+bei einer Rundmail (ein Verteiler in An oder mehr als 15 Empfänger) nur der Absender. So zählen Mails für die
+**Beteiligten** eines Themas wie Termine, und nach dem Einarbeiten trägt die Mail ihre `themen`. Log-Einträge
+und Aufgaben aus einer Mail nennen ihren Absender vor der Quellenangabe („… (laut X) (→ [[mail]])“, „…
+(von X)“) – außer der Text nennt ihn schon, es ist seine eigene Zusage oder die eigene Mail. Die Kopfzeilen
+im Text der Notiz bleiben wörtlich.
+
+**Nachziehen nach einem Update** (`nachziehen.py`, Schritt `nachziehen` der Automatik): Jede Aufbereitung,
+die aus Quellen Felder ableitet, hat eine Fassung, und jede Notiz trägt ihre (`mail_fassung`). Ist die Engine
+neuer, bringt die Automatik alte Notizen im Hintergrund auf den Stand – je Lauf ein Stück (200 Notizen oder
+60 Sekunden); „Heute“ zeigt, was noch offen ist (`.2ndbrain/daten/nachziehen.json`). Nachgezogen werden nur
+aufbereitete Felder, nie was der Nutzer geschrieben oder abgehakt hat; bei Mails aus der Original-Mail im
+Archiv (Message-ID), sonst aus den Kopfzeilen im Text. Auch später noch: bekommt eine Person eine Seite,
+zeigen ihre Mails darauf. Ein neues Einarbeiten mit dem Modell gehört nicht dazu – es legte Einträge doppelt
+an und verlöre, was inzwischen geändert wurde.
 Eine Mail, die schon einmal eingelesen und eingearbeitet wurde, wird kein zweites Mal eingelesen; sie
 wandert nach `.trash/doppelte-mails/`. Erkannt wird sie an der Message-ID ihrer Notiz im Archiv, bei
 älteren Mail-Notizen ohne Message-ID am Zeitstempel (Date-Header). Eine Datei, die sich nicht lesen

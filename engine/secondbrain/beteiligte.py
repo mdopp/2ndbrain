@@ -87,6 +87,10 @@ def compute(today: date | None = None) -> dict[str, list[tuple[str, float]]]:
     for f in (f for root in tk.meeting_roots() if root.is_dir() for f in root.rglob("*.md")):
         fm = vp.read_frontmatter_head(f)
         day = str(fm.get("date") or "")[:10]
+        if not day and str(fm.get("type") or "") == "email-thread":
+            # Mails: Absender und direkte Empfaenger (`teilnehmer`, adressen.py) zaehlen wie Teilnehmer
+            # eines Termins; das Datum steht im Dateinamen
+            day = vp.source_date(str(f), fallback="1900-01-01")
         if not (since <= day <= today.isoformat()):
             continue
         topics = th.note_topics(fm)

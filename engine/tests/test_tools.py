@@ -2021,6 +2021,184 @@ def t_nachbereiten_in_arbeit_und_waehrenddessen_geaendert():
         restore_vault()
 
 
+def _person(d: Path, slug: str, name: str, extra: str = "") -> None:
+    (d / "entities" / "people" / f"{slug}.md").write_text(f"---\ntype: person\nname: {name}\n{extra}---\n# {name}\n",
+                                                          encoding="utf-8", newline="\n")
+
+
+def t_adressen_personen_verteiler_rundmail():
+    """Absender und Empfaenger einer Mail (adressen.py): vollstaendig, Personen als Verweise - ueber die
+    Mail-Adresse ihrer Seite, den Namen, "Nachname, Vorname" (auch kodiert), vorname.nachname@ -, Verteiler
+    fuer sich, nie geraten bei gleichen Namen. Rundmail (Verteiler in An oder mehr als 15 Empfaenger): nur der
+    Absender ist Teilnehmer."""
+    d = temp_vault()
+    try:
+        import adressen
+        importlib.reload(adressen)
+        _person(d, "anna-berg", "Anna Berg", "email: anna.berg@firma.example\n")
+        _person(d, "karl-kurz", "Karl Kurz")
+        _person(d, "eva-wolke", "Eva Wolke")
+        _person(d, "eva-wolke-2", "Eva Wolke")
+        p = adressen.Personen()
+        k = adressen.felder('"Berg, Anna" <a.berg@anders.example>',
+                            "=?utf-8?q?Kurz=2C_Karl?= <karl.kurz@firma.example>, Team-AllMembers "
+                            "<team-allmembers@firma.example>, DCM <DCM@firma.example>, Fremd Person "
+                            "<fremd.person@firma.example>, <max.muster@firma.example>",
+                            "Anna Berg <anna.berg@firma.example>, Eva Wolke <eva.wolke@firma.example>, "
+                            "IT-Plattform-Global <IT-Plattform-Global@firma.example>", p)
+        eq(k["von"], "[[anna-berg|Anna Berg]]", "Absender:")
+        eq(k["an"], ["[[karl-kurz|Karl Kurz]]", "Fremd Person <fremd.person@firma.example>",
+                     "Max Muster <max.muster@firma.example>"], "An:")
+        eq(k["cc"], ["[[anna-berg|Anna Berg]]", "Eva Wolke <eva.wolke@firma.example>"], "CC, gleicher Name zweimal:")
+        eq(k["verteiler"], ["Team-AllMembers <team-allmembers@firma.example>", "DCM <DCM@firma.example>",
+                            "IT-Plattform-Global <IT-Plattform-Global@firma.example>"], "Verteiler:")
+        eq((k["rundmail"], k["teilnehmer"]), (True, ["[[anna-berg|Anna Berg]]"]), "Verteiler in An:")
+        klein = adressen.felder("Anna Berg <anna.berg@firma.example>", "Karl Kurz <k@x.example>", "", p)
+        eq((klein["rundmail"], klein["teilnehmer"]), (False, ["[[anna-berg|Anna Berg]]", "[[karl-kurz|Karl Kurz]]"]),
+           "kleine Runde:")
+        viele = ", ".join(f"Person Nr{i} <p{i}.x@firma.example>" for i in range(16))
+        eq(adressen.felder("Anna Berg <anna.berg@firma.example>", viele, "", p)["rundmail"], True, "mehr als 15:")
+        # Seite "Sternau Lena" (Nachname zuerst), Anzeige mit Initialen am Vornamen
+        _person(d, "sternau-lena", "Sternau Lena")
+        _person(d, "paul-ruhwinkel", "Paul Ruhwinkel")
+        p = adressen.Personen()
+        eq(adressen.felder("Lena Sternau <l.s@firma.example>", "PaulXY Ruhwinkel <p.r@firma.example>", "", p)["teilnehmer"],
+           ["[[sternau-lena|Sternau Lena]]", "[[paul-ruhwinkel|Paul Ruhwinkel]]"], "umgekehrt, Initialen:")
+        eq(adressen.aus_kopfzeile("Kurz, Karl <karl.kurz@firma.example>, Anna Berg <a@b.example>, solo@firma.example"),
+           '"Kurz, Karl" <karl.kurz@firma.example>, "Anna Berg" <a@b.example>, solo@firma.example', "dekodierte Zeile:")
+    finally:
+        restore_vault()
+
+
+def t_mail_notiz_empfaenger_vollstaendig():
+    """Die Mail-Notiz traegt alle Empfaenger (vorher bei 400 Zeichen abgeschnitten), als gueltiges YAML, mit
+    Fassung; die Kopfzeilen im Text bleiben woertlich und vollstaendig."""
+    d = temp_vault()
+    try:
+        import vault_paths as vp
+        import mails as ie
+        importlib.reload(ie)
+        _person(d, "anna-berg", "Anna Berg", "email: anna.berg@firma.example\n")
+        an = ", ".join(f"Person Nr{i} <p{i}.x@firma.example>" for i in range(30))
+        h = {"from": "Anna Berg <anna.berg@firma.example>", "to": an, "subject": "Rundschreiben",
+             "date": "Tue, 22 Sep 2026 09:41:41 +0000", "message_id": "<r-1@example.com>", "has_attachment": "no"}
+        _, md = ie.generate_vault_note(h, "Hallo zusammen.", [], [])
+        f = d / "notiz.md"
+        f.write_text(md, encoding="utf-8", newline="\n")
+        fm = vp.read_frontmatter(f)
+        eq((fm.get("von"), len(fm.get("an") or []), fm.get("rundmail"), fm.get("mail_fassung"), "from" in fm,
+            "participants" in fm), ("[[anna-berg|Anna Berg]]", 30, True, 2, False, False), "Felder:")
+        ok("Person Nr29 <p29.x@firma.example>" in fm["an"], fm["an"][-3:])
+        ok("Person Nr29" in md.split("**An:**")[1].split("\n")[0], "Kopfzeile im Text vollstaendig")
+    finally:
+        restore_vault()
+
+
+def t_nachziehen_alte_mails():
+    """Nach einem Update zieht die Automatik alte Mail-Notizen nach (nachziehen.py): Absender und Empfaenger
+    aus der Original-Mail oder den Kopfzeilen im Text - vollstaendig, verlinkt -, Themen aus dem Einarbeiten,
+    die alten Felder weg, der Text bleibt. Ein zweiter Lauf tut nichts; bekommt eine Person spaeter eine
+    Seite, zeigen ihre Mails darauf. Absender und direkte Empfaenger zaehlen als Beteiligte des Themas."""
+    d = temp_vault()
+    try:
+        import vault_paths as vp
+        import adressen
+        import beteiligte
+        import nachziehen
+        for mod in (adressen, beteiligte, nachziehen):
+            importlib.reload(mod)
+        _person(d, "anna-berg", "Anna Berg")
+        _person(d, "karl-kurz", "Karl Kurz")
+        (d / "entities" / "projects" / "portal.md").write_text("---\ntype: project\ntitle: Portal\n---\n# Portal\n",
+                                                               encoding="utf-8", newline="\n")
+        arch = d / "archive" / "meetings" / "2026-09"
+        arch.mkdir(parents=True)
+        alt = ("---\ntype: email-thread\ntitle: Portal Termin\nfrom: Anna Berg <anna.berg@firma.example>\n"
+               "to: 'Kurz, Karl <karl.kurz@firma.ex'\nparticipants:\n- Anna Berg\n- Kurz\nstatus: done\n"
+               "entities_updated:\n- portal\n---\n\n# Portal Termin\n\n**Datum:** 2026-09-20\n"
+               "**Von:** Anna Berg <anna.berg@firma.example>\n"
+               "**An:** Kurz, Karl <karl.kurz@firma.example>, Fremd Person <fremd.person@firma.example>\n\n"
+               "> Hallo Karl\n\n## Vollständiger Thread\n\n```\n**Von:** Zitat Leute <z@x.example>\n```\n")
+        m1, m2 = arch / "2026-09-20-portal-termin.md", arch / "2026-09-25-portal-nachfrage.md"
+        m1.write_text(alt, encoding="utf-8", newline="\n")
+        m2.write_text(alt.replace("Portal Termin", "Portal Nachfrage"), encoding="utf-8", newline="\n")
+        # eine dritte mit Original-Mail im Archiv: die geht vor (hier mit einem Empfaenger mehr)
+        m3 = arch / "2026-09-26-portal-rueckfrage.md"
+        m3.write_text(alt.replace("Portal Termin", "Portal Rueckfrage").replace(
+            "type: email-thread\n", "type: email-thread\nmessage_id: <p-3@example.com>\n"), encoding="utf-8", newline="\n")
+        (d / "archive" / "emails" / "2026-09").mkdir(parents=True)
+        (d / "archive" / "emails" / "2026-09" / "p3.eml").write_bytes(
+            b"Message-ID: <p-3@example.com>\nFrom: Anna Berg <anna.berg@firma.example>\n"
+            b"To: Karl Kurz <karl.kurz@firma.example>, Otto Beispiel <otto.beispiel@firma.example>\n"
+            b"Subject: Portal Rueckfrage\n\nHallo\n")
+        r = nachziehen.run()
+        eq((r["nachgezogen"], r["offen"], r["gesamt"]), (3, 0, 3), "erster Lauf:")
+        fm = vp.read_frontmatter(m1)
+        eq((fm.get("von"), fm.get("an"), fm.get("teilnehmer"), fm.get("themen"), fm.get("mail_fassung")),
+           ("[[anna-berg|Anna Berg]]", ["[[karl-kurz|Karl Kurz]]", "Fremd Person <fremd.person@firma.example>"],
+            ["[[anna-berg|Anna Berg]]", "[[karl-kurz|Karl Kurz]]"], ["portal"], 2), "Felder:")
+        ok(not any(k in fm for k in ("from", "to", "participants")), fm)
+        ok(m1.read_text(encoding="utf-8").split("---\n", 2)[2] == alt.split("---\n", 2)[2], "Text geaendert")
+        eq(vp.read_frontmatter(m3).get("an"), ["[[karl-kurz|Karl Kurz]]", "Otto Beispiel <otto.beispiel@firma.example>"],
+           "aus der Original-Mail:")
+        eq(nachziehen.run()["nachgezogen"], 0, "zweiter Lauf:")
+        _person(d, "fremd-person", "Fremd Person")
+        eq(nachziehen.run()["nachgezogen"], 2, "neue Person:")
+        ok("[[fremd-person|Fremd Person]]" in vp.read_frontmatter(m1)["an"], vp.read_frontmatter(m1)["an"])
+        stand = json.loads((d / ".2ndbrain" / "daten" / "nachziehen.json").read_text(encoding="utf-8"))
+        eq((stand["mail"]["offen"], stand["mail"]["gesamt"]), (0, 3), "Stand fuer Heute:")
+        bet = dict(beteiligte.compute(today=date(2026, 9, 30)).get("portal", []))
+        ok("anna-berg" in bet and "karl-kurz" in bet, f"Beteiligte: {bet}")
+    finally:
+        restore_vault()
+
+
+def t_uebernehmen_absender_aus_der_mail():
+    """Log-Eintraege und Aufgaben aus einer Mail nennen ihren Absender - vor der Quellenangabe, die alle Leser
+    erwarten: "(laut X)" / "(von X)". Nicht, wenn der Text X schon nennt, nicht bei Xs eigener Zusage, nicht
+    bei eigenen Mails und nicht bei Terminen."""
+    d = temp_vault()
+    try:
+        import aufgaben as tk
+        import stand
+        import uebernehmen as hs
+        (d / ".2ndbrain" / "local.config.json").write_text('{"ich": "ich-selbst"}', encoding="utf-8", newline="\n")
+        for slug, name in (("anna-berg", "Anna Berg"), ("karl-kurz", "Karl Kurz"), ("ich-selbst", "Ich Selbst")):
+            _person(d, slug, name)
+        thema = d / "entities" / "projects" / "portal.md"
+        thema.write_text("---\ntype: project\ntitle: Portal\n---\n# Portal\n\n## Offene Punkte\n\n## Event Log\n",
+                         encoding="utf-8", newline="\n")
+        (d / "inbox").mkdir()
+        mail = d / "inbox" / "2026-09-22-portal.md"
+        mail.write_text("---\ntype: email-thread\ntitle: Portal\nvon: '[[anna-berg|Anna Berg]]'\n---\n# Portal\n",
+                        encoding="utf-8", newline="\n")
+        hs.apply_project_updates([{"slug": "portal", "events": ["[RISK] Termin wackelt",
+                                                                "[STATUS] Anna Berg meldet Verzug"]}], source_file=str(mail))
+        hs.apply_action_items([{"project": "portal", "task": "Rampe pruefen", "owner": "karl-kurz", "deadline": "TBD"},
+                               {"project": "portal", "task": "Liste schicken", "owner": "anna-berg", "deadline": "TBD"}],
+                              source_file=str(mail))
+        text = thema.read_text(encoding="utf-8")
+        ok("[RISK] Termin wackelt (laut [[anna-berg|Anna Berg]]) (→ [[2026-09-22-portal]])" in text, text)
+        ok("[STATUS] Anna Berg meldet Verzug (→ [[2026-09-22-portal]])" in text, "doppelt genannt")
+        aufg = {t.text: t for t in tk.tasks_in_text(text, "project", stem="portal")}
+        rampe = aufg.get("Rampe pruefen (von [[anna-berg|Anna Berg]])")
+        ok(rampe is not None and rampe.owner == "karl-kurz" and rampe.source == "2026-09-22-portal", sorted(aufg))
+        ok("Liste schicken" in aufg, f"eigene Zusage mit von: {sorted(aufg)}")
+        ok(stand._EVENT_RE.match("- [2026-09-22] [RISK] Termin wackelt (laut [[anna-berg|Anna Berg]]) (→ [[x]])")
+           .group(3) == "Termin wackelt (laut [[anna-berg|Anna Berg]])", "Quellenangabe weiter lesbar")
+        # eigene Mail und ein Termin: nichts dazu
+        mail.write_text("---\ntype: email-thread\ntitle: Portal\nvon: '[[ich-selbst|Ich Selbst]]'\n---\n# Portal\n",
+                        encoding="utf-8", newline="\n")
+        termin = d / "inbox" / "2026-09-23-termin.md"
+        termin.write_text("---\ntype: meeting\ntitle: Runde\n---\n# Runde\n", encoding="utf-8", newline="\n")
+        hs.apply_project_updates([{"slug": "portal", "events": ["[DECISION] Go im Oktober"]}], source_file=str(mail))
+        hs.apply_project_updates([{"slug": "portal", "events": ["[DECISION] Rollout ab Montag"]}], source_file=str(termin))
+        text = thema.read_text(encoding="utf-8")
+        ok("[DECISION] Go im Oktober (→" in text and "[DECISION] Rollout ab Montag (→" in text, text)
+    finally:
+        restore_vault()
+
+
 def t_stand_haken_waehrend_des_modells_bleibt():
     """Setzt jemand einen Haken in der Themen-Datei, waehrend das Modell den Stand schreibt (Plugin,
     Editor), bleibt er: der Stand-Block kommt in den aktuellen Text."""
@@ -2697,7 +2875,7 @@ def t_people_profile_full_name_only_and_idempotent():
             "---\ntype: email-thread\ntitle: Upgrade\n---\n**Von:** Tímo Kranich <Timo.Kranich@example.com>\n",
             encoding="utf-8", newline="\n")
         (src / "2026-09-10-jourfix.md").write_text(
-            "---\ntype: meeting\ntitle: Jourfix | EDI\ndate: 2026-09-10\n---\nTamas war da.\n", encoding="utf-8", newline="\n")
+            "---\ntype: meeting\ntitle: Jourfix | EDI\ndate: 2026-09-10\n---\nOtto war da.\n", encoding="utf-8", newline="\n")
         report = pp.run(today=date(2026, 9, 16))
         full = (vp.PEOPLE_DIR / "timo-kranich.md").read_text(encoding="utf-8")
         ok("Eigene Notiz bleibt" in full, "manueller Inhalt verloren")
@@ -6186,6 +6364,14 @@ TESTS = [
     ("Nachbereiten: Termin in Arbeit waehrend des Modells, Aenderung in der Zeit wird nicht ueberschrieben",
      t_nachbereiten_in_arbeit_und_waehrenddessen_geaendert),
     ("Stand: ein Haken waehrend des Modells bleibt stehen", t_stand_haken_waehrend_des_modells_bleibt),
+    ("Adressen: Personen als Verweise (Adresse, Name, Nachname-Komma), Verteiler, gleiche Namen, Rundmail",
+     t_adressen_personen_verteiler_rundmail),
+    ("Mail-Notiz: alle Empfaenger (nicht mehr bei 400 Zeichen abgeschnitten), gueltiges YAML",
+     t_mail_notiz_empfaenger_vollstaendig),
+    ("Nachziehen: alte Mails auf die neue Fassung, Original-Mail vor Text, neue Person, Beteiligte",
+     t_nachziehen_alte_mails),
+    ("Uebernehmen: Absender einer Mail in Log und Aufgaben, Quellenangabe bleibt lesbar",
+     t_uebernehmen_absender_aus_der_mail),
     ("Einarbeiten: Probelauf schreibt nichts, Modell -> Log/Aufgabe/Person/Rueckfrage/Archiv, Rueckgaengig",
      t_einarbeiten_probelauf_run_and_undo),
     ("Mail-Verlauf = ein Paket: neueste Mail, aeltere samt Anhaengen mitgebuendelt und abgeschlossen",

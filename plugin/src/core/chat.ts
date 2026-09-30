@@ -721,6 +721,8 @@ const WERKZEUG_HINWEIS = [
   "- „Wer ist betroffen, wenn …?“, „Wer hat Bezug zu X?“, „Welche Systeme/Kontexte hängen an X?“ → `neighbors` "
     + "mit X und der Art (Person, System, Kontext …).",
   "- „Was war im letzten Termin zu X?“ → `neighbors` mit X und Art Termin (neueste zuerst), dann `read`.",
+  "- „Welche Mails kamen von X / gingen an X / zu Thema Y?“ → `neighbors` mit X oder Y und Art Mail (neueste "
+    + "zuerst; Kanten von, an, in Kopie), dann `read`.",
   "- „Was ist offen/überfällig bei X?“, „Welche Aufgaben oder Fragen hat Thema Y?“ → `tasks` (Person, Thema, "
     + "überfällig …); die Zahlen stehen im Ergebnis.",
   "- „Welche Risiken/Beschlüsse gab es zu X (seit …)?“ → `log` mit Thema, Art und Zeitraum.",

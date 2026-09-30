@@ -1,5 +1,6 @@
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type SecondBrainPlugin from "../main";
+import { nachziehenText } from "../core/inarbeit";
 import type { TopicTarget } from "./themen";
 import {
   MeetingInfo, PHASE_LABEL, TaskInfo, TopicInfo, dayLabel, daysBetween, followUps, healthEmoji,
@@ -110,6 +111,10 @@ export class TodayView extends ItemView {
     if (last) {
       const hh = last.at.toTimeString().slice(0, 5);
       status.createSpan({ text: ` · Automatik ${hh}${last.result?.ok === false ? " mit Fehlern" : ""}` });
+    }
+    if (this.plugin.nachziehen.length) {          // nach einem Update: alte Notizen im Hintergrund
+      status.createSpan({ text: ` · Nachziehen: ${nachziehenText(this.plugin.nachziehen)} offen`,
+                          attr: { title: "Alte Notizen kommen nach einem Update auf den neuen Stand – je Lauf der Automatik ein Stück." } });
     }
   }
 

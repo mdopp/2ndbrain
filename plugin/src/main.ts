@@ -1,8 +1,8 @@
 // Das Plugin: Ansichten, Befehle, Zustand. Lesen, Erfassen und Chat rechnet es selbst (src/core);
 // fuer alles andere startet es am Desktop die Python-Engine (src/desktop).
-import { FileSystemAdapter, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, normalizePath, requestUrl } from "obsidian";
+import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, normalizePath, requestUrl } from "obsidian";
 import { CaptureResult as CoreCaptureResult, Wartend, anwenden, capturable, vormerken } from "./core/nacherfassen";
-import { IN_ARBEIT, inArbeit, schreibweg } from "./core/inarbeit";
+import { IN_ARBEIT, NACHZIEHEN, Nachziehen, inArbeit, nachziehenOffen, schreibweg } from "./core/inarbeit";
 import { stem } from "./core/quelle";
 import { ChatAnswer, ChatRequest, Fortschritt, ask } from "./core/chat";
 import { localIsoDate } from "./core/datum";
@@ -88,6 +88,7 @@ export default class SecondBrainPlugin extends Plugin {
   llmState = { ok: false, detail: "noch nicht geprüft" };
   llmModels: string[] = [];          // was der Server unter /v1/models anbietet (Auswahl in den Einstellungen)
   lastAuto: { at: Date; result: AutoResult | null } | null = null;
+  nachziehen: Nachziehen[] = [];     // alte Notizen, die die Automatik nach einem Update nachzieht (offen)
   jobs: WrapupJob[] = [];
   openTopics: OpenSeries[] = [];
   chatState: ChatState = newChatState();   // Gespraech - uebersteht den Wechsel klein/gross
@@ -186,6 +187,7 @@ export default class SecondBrainPlugin extends Plugin {
     await this.refreshLlm();
     if (!this.desktop) return;
     if (this.settings.wartend.length) void this.wartendAbarbeiten();   // vorgemerkt vor dem Neustart
+    await this.nachziehenLesen();
     await this.resolvePython();
     await this.refreshEngine();
     if (this.engineStatus.state === "fehlt") {
@@ -734,6 +736,7 @@ export default class SecondBrainPlugin extends Plugin {
     this.updateStatus();
     const result = await this.engine.json<AutoResult>(["auto", "--json"]);
     this.lastAuto = { at: new Date(), result };
+    await this.nachziehenLesen();
     const changed = (result?.steps ?? []).filter((s) => (s.changed ?? 0) > 0 && !s.skipped);
     if (!result) {
       new Notice("2ndBrain: Automatik lieferte kein Ergebnis – Python/Engine prüfen.");
@@ -755,12 +758,21 @@ export default class SecondBrainPlugin extends Plugin {
 
   /** Fenster "Nacherfassen" - Nachbereiten laeuft nur aus dem Fenster heraus. */
   async openCapture(path: string): Promise<void> {
+    await this.ungespeichertSichern(path);
     const m = await this.index.meeting(path);
     if (!m) {
       new Notice("Keine Termin-Notiz.");
       return;
     }
     new CaptureModal(this.app, this, m).open();
+  }
+
+  /** Was im Editor zu dieser Notiz noch nicht gespeichert ist, zuerst auf die Platte: Obsidian speichert erst
+   *  nach ein, zwei Sekunden, das Fenster und die Engine lesen die Datei - eben Eingefuegtes fehlte sonst. */
+  private async ungespeichertSichern(path: string): Promise<void> {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      if (leaf.view instanceof MarkdownView && leaf.view.file?.path === path) await leaf.view.save();
+    }
   }
 
   /** Eine Aenderung an einer Termin-Notiz (src/core/nacherfassen.ts) - auch waehrend die Engine laeuft, nur
@@ -788,6 +800,17 @@ export default class SecondBrainPlugin extends Plugin {
       return "ok";
     } finally {
       if (frei) await this.releaseAutoLock();
+    }
+  }
+
+  /** Was die Automatik nach einem Update noch nachzieht (engine/secondbrain/nachziehen.py) - fuer Heute. */
+  private async nachziehenLesen(): Promise<void> {
+    if (!this.desktop) return;
+    const adapter = this.app.vault.adapter;
+    try {
+      this.nachziehen = nachziehenOffen((await adapter.exists(NACHZIEHEN)) ? await adapter.read(NACHZIEHEN) : null);
+    } catch {
+      this.nachziehen = [];
     }
   }
 

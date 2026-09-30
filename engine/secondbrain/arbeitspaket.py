@@ -251,7 +251,7 @@ def parent_context(stem: str) -> dict | None:
     fm = vp.read_frontmatter_head(note)
     text = _note_text(note)
     return {"file": note.name, "title": str(fm.get("title") or stem),
-            "from": str(fm.get("from") or ""), "date": _name_date(note.name),
+            "from": str(fm.get("von") or ""), "date": _name_date(note.name),
             "excerpt": text[:PARENT_EXCERPT_CHARS]}
 
 

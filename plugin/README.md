@@ -16,7 +16,7 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.11.3)
+## Was es kann (0.12.0)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|
@@ -30,7 +30,8 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Anleitung**: eingebaut (`anleitung.md`, steckt in main.js), eigene Ansicht | ja | ja | nein |
 | **Offene Fragen** (Kanon, Systemübersicht) im Chat – der einzige Chat-Teil, der die Engine braucht | – | ja | nein |
 | **Thema zuordnen**, **Mit wem?**, Liste *Ohne Thema* | – | ja | nein |
-| **Automatik**: `2ndbrain auto` alle N Minuten | – | ja | teils |
+| **Automatik**: `2ndbrain auto` alle N Minuten; nach einem Update zieht sie alte Notizen im Hintergrund nach (*Heute* zeigt den Stand) | – | ja | teils |
+| **Mails**: Absender und Empfänger als Verweise auf die Personen, Verteiler für sich; zählen für die Beteiligten eines Themas; im Chat als eigene Art („Welche Mails kamen von X?“) | ja | ja | nein |
 | **Systemübersicht (LikeC4)** | – | ja | nein |
 
 Termin-Notizen legt die Automatik **heute bis zum nächsten Werktag** an; Privates wird keine Notiz.

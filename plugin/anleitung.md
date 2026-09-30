@@ -16,9 +16,12 @@ dem Befehl „Anleitung: so funktioniert 2ndBrain“.
 1. **„Heute“ öffnen** – Kalender-Symbol in der linken Leiste oder Befehl „Heute öffnen“.
 2. **„Ohne Notizen“ leeren** – für vergangene Termine Notizen nachtragen (✏️) oder den Termin
    überspringen (⏭), wenn es nichts festzuhalten gibt.
-3. **Im Termin mitschreiben** – Stichpunkte in der Termin-Notiz oder über ✏️ „Nacherfassen“.
+3. **Im Termin mitschreiben** – Stichpunkte in der Termin-Notiz oder über ✏️ „Nacherfassen“. In der
+   Notiz zählt, was unter `## Meine Notizen`, `## Mitschrift`, `## Transkript` oder
+   `## Teams-Zusammenfassung` steht; der graue Hinweis `<!-- … -->` darunter stört nicht.
 4. **„Speichern und nachbereiten“** – 2ndBrain zieht Entscheidungen, Aufgaben und offene Fragen
-   heraus. Das Ergebnis siehst du sofort und kannst es zurücknehmen.
+   heraus. Steht schon etwas in der Notiz, zeigt das Fenster es oben an; das Textfeld darf dann leer
+   bleiben. Das Ergebnis siehst du sofort und kannst es zurücknehmen.
 5. **Rückfragen beantworten**, wenn 2ndBrain etwas nicht sicher zuordnen kann (ein Haken genügt).
 
 Den Rest erledigt die **Automatik** am Desktop im Hintergrund (Standard: alle 20 Minuten):
@@ -99,6 +102,16 @@ Themen, Personen und Terminen – je Lauf drei Vorgänge (`"je_lauf"` in `.2ndbr
 ein großer Stapel braucht also ein paar Läufe. Eine Datei, die sich nicht lesen lässt (altes `.doc`,
 beschädigt), bleibt mit Grund liegen. Mails aus Outlook als `.eml` speichern – `.msg` liest 2ndBrain
 nicht. Was direkt im Vault-Ordner liegt, bleibt unberührt (außer Mails).
+
+In der Mail-Notiz stehen **Absender und Empfänger** vollständig (`von`, `an`, `cc`), jede Person mit
+eigener Seite als Verweis – so findest du über eine Person ihre Mails, und im Chat geht „Welche Mails kamen
+von X zu Thema Y?“. Verteiler stehen für sich (`verteiler`). Wer einer Mail schreibt oder direkt
+angeschrieben wird, zählt bei ihren Themen als **beteiligt** (bei Rundmails nur der Absender). Log-Einträge und
+Aufgaben aus einer Mail nennen ihren Absender: „… (laut X)“, „… (von X)“.
+
+**Nach einem Update** bringt die Automatik alte Notizen im Hintergrund auf den neuen Stand, wenn eine
+Aufbereitung besser geworden ist – je Lauf ein Stück; in *Heute* steht dann „Nachziehen: …“. Nachgezogen
+werden nur Felder, die 2ndBrain selbst ausfüllt – nie, was du geschrieben oder abgehakt hast.
 
 Mit dem Modell einsortiert wird erst nach deiner Freigabe: einmal den Probelauf ansehen
 (`2ndbrain einarbeiten --probelauf`), dann in `.2ndbrain/local.config.json`
