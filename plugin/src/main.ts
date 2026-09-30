@@ -1,12 +1,13 @@
 // Das Plugin: Ansichten, Befehle, Zustand. Lesen, Erfassen und Chat rechnet es selbst (src/core);
 // fuer alles andere startet es am Desktop die Python-Engine (src/desktop).
-import { FileSystemAdapter, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, requestUrl } from "obsidian";
+import { FileSystemAdapter, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, normalizePath, requestUrl } from "obsidian";
 import {
   CaptureResult as CoreCaptureResult, appendNotes, capturable, setEntfallen, setSkip, setWrapupRequest,
 } from "./core/nacherfassen";
-import { ChatAnswer, ChatRequest, ask } from "./core/chat";
+import { ChatAnswer, ChatRequest, Fortschritt, ask } from "./core/chat";
 import { localIsoDate } from "./core/datum";
-import { HttpPost, complete, stripThink } from "./core/modell";
+import { Graph, baueGraph } from "./core/graph";
+import { HttpPost, complete, completeTools, stripThink } from "./core/modell";
 import type { MeetingInfo, RiskRow, TaskInfo } from "./core/ansicht";
 import { RISK_WINDOW_DAYS, riskRows } from "./core/risiken";
 import { SKILL_DIR, SkillRecipe, parseSkills } from "./core/rezepte";
@@ -108,6 +109,9 @@ export default class SecondBrainPlugin extends Plugin {
   private llmCfg: { url: string; model: string; timeoutS: number } | null = null;
   private localCfg: { ich: string; beschreibung: string } | null = null;
   private skillCache: SkillRecipe[] | null = null;
+  // Wissensgraph fuer die Werkzeuge des Chats - gebaut bei der ersten Frage, die ihn braucht, und nach
+  // jeder Aenderung im Vault verworfen (neu gebaut erst bei der naechsten Frage)
+  private graphCache: Promise<Graph> | null = null;
 
   /** Python-Engine (Desktop) - am Handy eine, die "nur am Desktop" antwortet. */
   get engine(): EngineApi {
@@ -147,6 +151,7 @@ export default class SecondBrainPlugin extends Plugin {
     // dauert Millisekunden (Frontmatter erst, wenn der Cache sie kennt: daher auch "changed").
     const refresh = debounce(() => void this.refreshFromVault(), 1_500, true);
     const onChange = (f: TAbstractFile) => {
+      if (f.path.endsWith(".md")) this.graphCache = null;
       if (f.path.startsWith("active-meetings/") || f.path.startsWith("entities/")) refresh();
     };
     this.registerEvent(this.app.vault.on("modify", onChange));
@@ -210,18 +215,47 @@ export default class SecondBrainPlugin extends Plugin {
     return this.engineStatus;
   }
 
-  /** Engine installieren oder aktualisieren: `python -m pip install --upgrade <Quelle>`. */
+  /** Das Engine-Paket, das der Build neben main.js legt (`2ndbrain-<version>-py3-none-any.whl`) - voller
+   *  Pfad, oder null, wenn es fehlt. */
+  private async beigelegteEngine(v: string): Promise<string | null> {
+    const adapter = this.app.vault.adapter;
+    const rel = normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/2ndbrain-${v}-py3-none-any.whl`);
+    return adapter instanceof FileSystemAdapter && (await adapter.exists(rel)) ? adapter.getFullPath(rel) : null;
+  }
+
+  /** Engine installieren oder aktualisieren: `python -m pip install --upgrade <Quelle>`. Quelle: eingetragen >
+   *  dem Plugin beigelegt > GitHub-Release. Lehnt das Python des Systems pip ab (Homebrew, PEP 668), bekommt
+   *  die Engine eine eigene Umgebung (~/.2ndbrain/venv), deren Python danach eingetragen ist. */
   async installEngine(): Promise<boolean> {
     if (!this.desktop) return false;
     const v = this.manifest.version;
-    const quelle = this.settings.engineQuelle.trim()
+    const quelle = this.settings.engineQuelle.trim() || (await this.beigelegteEngine(v))
       || `${ENGINE_REPO}/releases/download/${v}/2ndbrain-${v}-py3-none-any.whl`;
     const ziel = quelle.startsWith("-e ") ? ["-e", quelle.slice(3).trim()] : [quelle];
     new Notice("2ndBrain: Engine wird installiert …");
-    const r = await this.engine.python(["-m", "pip", "install", "--upgrade", ...ziel], { timeoutMs: 10 * 60_000 });
+    const pip = () => this.engine.python(["-m", "pip", "install", "--upgrade", ...ziel], { timeoutMs: 10 * 60_000 });
+    let r = await pip();
+    if (r.code !== 0 && /externally-managed-environment/.test(r.stderr + r.stdout)) {
+      const venv = this.desktop.venvDir();
+      new Notice(`2ndBrain: Das Python des Systems ist verwaltet (etwa Homebrew) – die Engine bekommt eine eigene Umgebung in ${venv}.`, 10_000);
+      const neu = await this.engine.python(["-m", "venv", venv], { timeoutMs: 5 * 60_000 });
+      if (neu.code === 0) {
+        this.settings.pythonPath = this.desktop.venvPython(venv);
+        await this.saveSettings();
+        this.pythonLookup = null;
+        this.pythonInfo = null;
+        await this.resolvePython();
+        r = await pip();
+      } else r = neu;
+    }
     await this.refreshEngine();
     if (r.code !== 0) {
-      new Notice(`2ndBrain: Installation fehlgeschlagen.\n${(r.stderr || r.stdout).trim().split("\n").slice(-3).join("\n")}`, 20_000);
+      const text = (r.stderr || r.stdout).trim();
+      const hinweis = /\b404\b|Not Found/.test(text) && quelle.startsWith(ENGINE_REPO)
+        ? "Das Engine-Paket liegt dem Plugin nicht bei, und GitHub liefert es nicht (Repo privat oder kein Release). "
+          + "Plugin neu bauen (legt die Engine bei) oder unter Engine-Quelle „-e <Pfad>/2ndbrain-code/engine“ eintragen.\n"
+        : "";
+      new Notice(`2ndBrain: Installation fehlgeschlagen.\n${hinweis}${text.split("\n").slice(-3).join("\n")}`, 20_000);
       return false;
     }
     new Notice(`2ndBrain: ${this.engineStatus.text}`, 8000);
@@ -357,13 +391,28 @@ export default class SecondBrainPlugin extends Plugin {
     }
   }
 
+  /** Wissensgraph ueber Notizen, Atlas und Systemuebersicht (core/graph.ts), zwischengespeichert. */
+  graph(): Promise<Graph> {
+    if (!this.graphCache) {
+      const g = baueGraph(this.source, this.selfSlug);
+      this.graphCache = g;
+      g.catch(() => { if (this.graphCache === g) this.graphCache = null; });
+    }
+    return this.graphCache;
+  }
+
   /** Frage an den Vault (src/core/chat.ts): Ausschnitt hier, Modell direkt ueber requestUrl -
-   *  am Desktop wie am Handy. Nur "Offene Fragen" (Atlas) geht ueber die Engine. */
-  async askChat(req: ChatRequest): Promise<ChatAnswer> {
+   *  am Desktop wie am Handy; reicht der Ausschnitt nicht, schlaegt das Modell mit den Werkzeugen
+   *  nach (Graph). Nur "Offene Fragen" (Atlas) geht ueber die Engine. */
+  async askChat(req: ChatRequest, fortschritt?: (f: Fortschritt) => void): Promise<ChatAnswer> {
     return ask(req, {
       src: this.source, today: localIsoDate(), me: this.selfSlug, beschreibung: this.vaultDescription,
       skills: await this.chatSkills(),
       llm: async (messages) => stripThink(await complete(this.httpPost, this.llm, messages, { maxTokens: 900, temperature: 0.2 })),
+      llmWerkzeuge: (messages, tools, wahl) =>
+        completeTools(this.httpPost, this.llm, messages, tools, { maxTokens: 900, temperature: 0.2, wahl }),
+      graph: () => this.graph(),
+      fortschritt,
       files: () => new Set(this.app.vault.getMarkdownFiles().map((f) => f.basename.toLowerCase())),
       vault: this.app.vault.getName(),
       // Was gemeint ist, waehlt das Modell (kurz, mit eigenem Zeitlimit); ist es nicht erreichbar,
@@ -450,8 +499,9 @@ export default class SecondBrainPlugin extends Plugin {
       this.pythonInfo = info;
       if (!info && !this.pythonWarned) {
         this.pythonWarned = true;
-        new Notice("2ndBrain: kein Python ≥ 3.10 gefunden (py, python, python3). Python installieren "
-          + "(python.org) oder den Pfad in den Einstellungen eintragen.", 15_000);
+        new Notice("2ndBrain: kein Python ≥ 3.10 gefunden (gesucht über den PATH und an den üblichen Orten wie "
+          + "Homebrew, python.org, pyenv). Python installieren (python.org oder Homebrew) oder den Pfad in den "
+          + "Einstellungen eintragen, am Mac etwa /opt/homebrew/bin/python3.", 15_000);
       } else if (info && configured && info.command !== configured) {
         new Notice(`2ndBrain: Python „${configured}“ geht nicht – nutze ${info.executable} (${info.version}).`, 10_000);
       }

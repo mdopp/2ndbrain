@@ -324,6 +324,41 @@ Kontexten bekommt nie den Themenbaum. Den Bezug kann man im Chat einzeln entfern
 mit `SB_ABSICHT=1 SB_VAULT=<Vault>` und `.2ndbrain/chat-fragen.json` im Vault (Regeln gegen Modell). Jeder Kasten trägt den Pfad seiner Notiz im Hinweistext – ein Klick öffnet sie, im Chat wie
 in jeder Notiz (Obsidians Mermaid entfernt obsidian://-Adressen, das Plugin öffnet selbst).
 
+**Fragen über mehrere Schritte** (seit 0.11): Mit der Frage gehen der Ausschnitt, die offene Notiz (bis
+8.000 Zeichen, gekürzt mit Gliederung) und das Gespräch (jüngstes zuerst, bis 12.000 Zeichen ≈ 3–4k Token;
+Bilder als Vermerk) an das Modell. Reicht das nicht, schlägt es nach – vier Werkzeuge im OpenAI-Format
+(llama.cpp mit `--jinja`), nur lesend (`core/werkzeuge.ts`): `search` (Namen, Aliasse, Atlas-IDs,
+Volltext), `read` (Notiz, auch einen Abschnitt; Atlas-Eintrag mit Beschreibung und Bezügen; System mit
+seinen Verbindungen), `path` (bis zu drei Wege zwischen zwei Punkten über verschiedene
+Zwischenstationen) und `neighbors` (Umkreis bis drei Schritte, nach Art filterbar; Termine: direkt
+verbundene zuerst, darin die neuesten); dazu die Abfragen aus `core/abfragen.ts` auf denselben Daten wie
+Heute und die Cockpit-Seiten – `tasks` (Person, „ich“, Thema mit Unterthemen, Status, Art, überfällig,
+Frist, Altbestand), `log` (Risiken, Beschlüsse, Status, Meilensteine, Fristen nach Thema und Zeitraum),
+`meetings` (Termin-Notizen und Kalender ohne Notiz, Thema über Reihe oder Titel wie beim Anlegen) und
+`query` (Frontmatter: gleich – auch über Links und Namen –, enthält, fehlt, größer/kleiner, sortiert) und
+`atlas` (wie `query_canon`/`join_canon` des Atlas-Agenten, aber auf dem Kontext-Verzeichnis im Vault:
+Nachrichten nach Typ mit Gegenseite und Owner, Prozesse mit Schritten, Teams mit ihren Kontexten, das
+Domänenmodell – Fachobjekte mit Stereotyp und Relationen, im Graphen Kanten mit dem Verb –, Kontexte,
+Subdomänen, Beziehungen, Externe; gefiltert nach Kontext, Subdomäne, Team, Typ, Reife);
+Filtern und Zählen macht der Code, die Zahlen stehen im Ergebnis. Gleichnamiges (ein Name als Thema,
+Begriff, Subdomäne, Team) ist ein Punkt; gelesen wird das Thema zuerst. Die Wartezeile zeigt Runde,
+Werkzeug und Schritt. Grundlage ist ein
+**Wissensgraph** (`core/graph.ts`, am Desktop wie am Handy, vom Plugin vorgehalten und nach Änderungen
+neu gebaut): Knoten sind alle sichtbaren Notizen und die Einträge des Kontext-Verzeichnisses, Kanten
+[[Links]], Felder im Frontmatter (auch Slugs ohne Klammern wie `themen:` eines Termins), Atlas-IDs im
+Text, die Bezüge im Atlas und die Verbindungstabelle der Systemübersicht. Ein Knoten kostet als
+Zwischenstation umso mehr, je mehr Verbindungen er hat (1 + ln(1 + Grad)); die eigene Person und
+Berichte, Übersichten, Verzeichnis und Vorlagen sind nie Zwischenstation – sonst liefe jeder Weg
+darüber. Punkt-Ordner gehören nicht zum Graphen (Konfiguration, Schlüssel, Papierkorb). Grenzen der
+Schleife: vier Runden mit Werkzeugen, dann antwortet das Modell (die Werkzeuge bleiben im Prompt,
+`tool_choice: none` – der Server rechnet den Anfang aus dem Zwischenspeicher); drei Aufrufe je Runde,
+acht je Frage, 6.000 Zeichen je Ergebnis, 40.000 zusammen; gleiche Aufrufe laufen einmal. Kennt der
+Server keine Werkzeuge, antwortet das Modell wie früher in einem Schritt. Was Notizen, Mails und
+Dokumente sagen, ist Material, keine Anweisung; Bilder von außen und HTML in Antworten werden Text (ein
+Bild mit Daten in der Adresse könnte sonst beim Anzeigen etwas nach außen tragen). Probelauf an echten
+Fragen: `plugin/tests/mehrschritt.test.ts` mit `SB_MEHRSCHRITT=1 SB_VAULT=<Vault>` und
+`.2ndbrain/chat-fragen-mehrschritt.json` im Vault.
+
 ## 9. Aufbau
 
 | Teil | Ordner im Repo | Läuft |
@@ -339,7 +374,13 @@ in `.2ndbrain/` (`llm.config.json`, `local.config.json`, `chat-skills/`, `protok
 MCP-Befehl) oder ab dem aktuellen Ordner; ohne Vault bricht sie ab. Plugin und Engine tragen dieselbe
 Version; das Plugin prüft die Version der Engine und bietet Installieren und Aktualisieren an
 („Obsidian-nah in der Bedienung, nicht in der Verpackung“ – die Engine läuft auch ohne Obsidian:
-MCP, Automatik, Befehlszeile).
+MCP, Automatik, Befehlszeile). Das Engine-Paket liegt dem Plugin bei: der Build legt
+`2ndbrain-<version>-py3-none-any.whl` neben `main.js`, „Installieren“ nimmt es von dort (sonst eine eigene
+Quelle aus den Einstellungen, zuletzt ein GitHub-Release). Lehnt das Python des Systems pip ab (Homebrew,
+PEP 668), bekommt die Engine eine eigene Umgebung `~/.2ndbrain/venv`, deren Python eingetragen wird. Python
+sucht das Plugin am Mac nicht nur über den PATH – Programme aus Finder oder Dock bekommen nur
+`/usr/bin:/bin:/usr/sbin:/sbin` –, sondern auch in Homebrew, python.org, pyenv und MacPorts (der
+Xcode-Platzhalter `/usr/bin/python3` zuletzt); Engine und LikeC4-Explorer bekommen diese Ordner in den PATH.
 
 ## 10. Leitlinien
 

@@ -6,4 +6,4 @@ Die Module liegen flach in diesem Paket und importieren einander ueber ihren Nam
 (`import vault_paths as vp`); `__main__` und die meisten Module setzen dafuer den Paketordner
 in sys.path. Der Code liegt nicht im Vault - Konfiguration und Daten stehen in dessen `.2ndbrain/`.
 """
-__version__ = "0.10.0"
+__version__ = "0.11.1"

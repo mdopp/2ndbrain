@@ -2,7 +2,10 @@
 // Desktop. Alle Laeufe gehen durch EINE Warteschlange: parallele Schreiber auf dieselben Dateien
 // und parallele Modellanfragen (Server laeuft mit --parallel 1) werden so vermieden.
 import { spawn } from "child_process";
+import { homedir } from "os";
+import { dirname } from "path";
 import type { EngineApi, EngineResult, RunOptions } from "../engineApi";
+import { erweiterterPfad } from "./python";
 
 export class Engine implements EngineApi {
   private tail: Promise<unknown> = Promise.resolve();
@@ -31,7 +34,7 @@ export class Engine implements EngineApi {
       const python = await this.findPython();
       if (!python) {
         return { code: -1, stdout: "", seconds: 0,
-                 stderr: "Kein Python ≥ 3.10 gefunden (py, python, python3) – installieren oder in den Einstellungen eintragen." };
+                 stderr: "Kein Python ≥ 3.10 gefunden (PATH, Homebrew, python.org, pyenv) – installieren oder in den Einstellungen eintragen." };
       }
       return this.spawnOnce(python, args, opts.timeoutMs ?? 15 * 60_000, opts.input);
     };
@@ -55,12 +58,16 @@ export class Engine implements EngineApi {
     return new Promise((resolve) => {
       let out = "";
       let err = "";
+      // Mac/Linux: der PATH des Programms ist oft zu kurz (Homebrew fehlt) - der Ordner dieses Pythons
+      // und die ueblichen Orte kommen dazu (die Engine sucht dort etwa likec4/npx). Windows bleibt.
+      const pfad = process.platform === "win32" ? {}
+        : { PATH: erweiterterPfad(process.env.PATH ?? "", process.platform, homedir(), python.includes("/") ? [dirname(python)] : []) };
       const child = spawn(python, args, {
         cwd: this.vault,
         windowsHide: true,
         // UTF-8 erzwingen: Windows-Pipes sind sonst cp1252 (Umlaute, Pfeile). VAULT_DIR: die Engine
         // liegt nicht im Vault und findet ihn so.
-        env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", VAULT_DIR: this.vault, ...this.extraEnv() },
+        env: { ...process.env, ...pfad, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", VAULT_DIR: this.vault, ...this.extraEnv() },
       });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");

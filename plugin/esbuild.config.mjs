@@ -6,6 +6,7 @@
 // zum Vault enthaelt (nur lokal, nicht im Repo); sonst - und immer mit `production dist` - dist/
 // (Release: main.js, manifest.json, styles.css).
 import esbuild from "esbuild";
+import { spawnSync } from "node:child_process";
 import { builtinModules } from "node:module";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -26,6 +27,22 @@ const external = [
   "@codemirror/view", "@lezer/common", "@lezer/highlight", "@lezer/lr",
   ...builtinModules, ...builtinModules.map((m) => `node:${m}`),
 ];
+
+/** Das Engine-Paket (Wheel `2ndbrain-<version>-py3-none-any.whl`) neben main.js legen: „Installieren“ im
+ *  Plugin nimmt es von dort - ohne Download (das Repo ist privat, Releases gibt es nicht). Scheitert der
+ *  Schritt (kein Python, offline), baut das Plugin trotzdem; dann bleibt die Engine-Quelle in den Einstellungen. */
+function engineBeilegen(ziel) {
+  const py = process.env.SB_PYTHON || (process.platform === "win32" ? "python" : "python3");
+  const r = spawnSync(py, ["-m", "pip", "wheel", "--no-deps", "--quiet", "-w", ziel, join(repo, "engine")], { encoding: "utf8" });
+  if (r.status !== 0) {
+    console.warn(`[Engine] Paket nicht beigelegt: ${String(r.stderr || r.error || "").trim().split("\n").slice(-2).join(" ")}`);
+    return;
+  }
+  const version = JSON.parse(readFileSync(join(repo, "manifest.json"), "utf8")).version;
+  const wheel = `2ndbrain-${version}-py3-none-any.whl`;
+  console.log(existsSync(join(ziel, wheel)) ? `[Engine] beigelegt: ${wheel}`
+    : `[Engine] WARNUNG: ${wheel} fehlt – Version von Engine und Plugin gleich? (${readdirSync(ziel).filter((f) => f.endsWith(".whl")).join(", ")})`);
+}
 
 if (mode === "test") {
   const tests = readdirSync(join(here, "tests")).filter((f) => f.endsWith(".test.ts"));
@@ -56,6 +73,7 @@ if (mode === "test") {
   if (mode === "production") {
     await ctx.rebuild();
     await ctx.dispose();
+    engineBeilegen(outDir);
   } else {
     await ctx.watch();
   }

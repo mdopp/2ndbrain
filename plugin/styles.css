@@ -134,6 +134,9 @@ details[open] > .sb-summary::before { transform: rotate(90deg); }
 .sb-chat-error { border-left: 3px solid var(--text-error); }
 .sb-chat-pending { color: var(--text-muted); font-style: italic; }
 .sb-chat-meta { margin-top: 4px; font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.sb-chat-quellen { margin-top: 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.sb-chat-schritt { font-size: var(--font-ui-smaller); line-height: 1.4; }
+.sb-chat-quellen p { margin: 0; }
 .sb-chat-md p, .sb-chat-md ul, .sb-chat-md ol { margin: 0.3em 0; }
 .sb-chat-md ul, .sb-chat-md ol { padding-left: 1.3em; }
 .sb-chat-md h1, .sb-chat-md h2, .sb-chat-md h3 { font-size: 1em; margin: 0.5em 0 0.2em; }

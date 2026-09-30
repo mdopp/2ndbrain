@@ -1,6 +1,6 @@
-import { ItemView, MarkdownRenderer, Menu, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, MarkdownRenderer, Menu, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { BezugTeil, ChatRequest, GEWAEHLT } from "../core/chat";
+import { BezugTeil, ChatRequest, Fortschritt, GEWAEHLT, Gelesen } from "../core/chat";
 import { exampleTopics } from "../core/ansicht";
 import { BezugModal } from "./bezug";
 
@@ -36,9 +36,24 @@ export interface ChatAnswer {
   dauer_s?: number;
   karte?: Karte | null;        // Frage-Modus: naechste Frage (null = keine mehr)
   ueberspringen?: string[];    // im Gespraech mit "später" uebergangen
+  gelesen?: Gelesen[];         // was die Werkzeuge nachgeschlagen haben
+  schritte?: string[];
+  runden?: number;             // Modellaufrufe der Schleife
+  ohneWerkzeuge?: string;      // der Server lehnte die Werkzeuge ab (Grund)
 }
 
-interface Turn { rolle: "nutzer" | "assistent"; text: string; meta?: string; fehler?: boolean; karte?: Karte }
+interface Turn {
+  rolle: "nutzer" | "assistent"; text: string; meta?: string; fehler?: boolean; karte?: Karte;
+  gelesen?: Gelesen[]; schritte?: string[];
+}
+
+/** Unter der Antwort: was nachgeschlagen wurde - Notizen anklickbar, Suchen und Wege als Text. */
+function nachgeschlagen(t: Turn): string {
+  const teile = (t.gelesen ?? []).map((g) => (g.pfad ? `[[${g.pfad.replace(/\.md$/, "")}|${g.name.split("|").join("/")}]]`
+                                                     : `${g.name} (\`${g.id}\`)`));
+  teile.push(...(t.schritte ?? []).filter((s) => !s.startsWith("liest ")));
+  return teile.length ? `Nachgeschlagen: ${teile.join(" · ")}` : "";
+}
 
 /** Das Gespraech - beim Plugin, nicht in der Ansicht: es uebersteht den Wechsel klein <-> gross. */
 export interface ChatState { turns: Turn[]; bezug: Bezug | null; karte: Karte | null; skip: string[]; busy: boolean }
@@ -141,14 +156,11 @@ export class ChatView extends ItemView {
     menu.showAtMouseEvent(e);
   }
 
-  /** Aktive Notiz als Bezug, solange der Nutzer ihn nicht weggeklickt hat. */
-  private activeScopeFile(): string | null {
+  /** Offene Notiz - jede sichtbare Markdown-Notiz; ihr Inhalt geht mit, solange der Nutzer sie nicht
+   *  weggeklickt hat. */
+  private activeNote(): string | null {
     const f = this.app.workspace.getActiveFile();
-    let path = f && SCOPE_RE.test(f.path) ? f.path : null;
-    if (f && path && /^entities\/(glossary|systems|contexts)\//.test(path)) {
-      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
-      if (!fm.atlas_id && !fm.atlas_kontexte) path = null;          // Atlas-Seite nur mit Atlas-Bezug
-    }
+    const path = f && f.extension === "md" && !f.path.split("/").some((s) => s.startsWith(".")) ? f.path : null;
     if (path !== this.lastFile) {
       this.lastFile = path;
       this.useActive = true;                  // neue Notiz: Bezug wieder an
@@ -156,11 +168,23 @@ export class ChatView extends ItemView {
     return this.useActive ? path : null;
   }
 
+  /** Offene Notiz als Bezug: Thema, Person, Reihe, Termin - Atlas-Seiten nur mit Atlas-Bezug. */
+  private activeScopeFile(): string | null {
+    const path = this.activeNote();
+    if (!path || !SCOPE_RE.test(path)) return null;
+    if (/^entities\/(glossary|systems|contexts)\//.test(path)) {
+      const f = this.app.vault.getAbstractFileByPath(path);
+      const fm = f instanceof TFile ? this.app.metadataCache.getFileCache(f)?.frontmatter ?? {} : {};
+      if (!fm.atlas_id && !fm.atlas_kontexte) return null;
+    }
+    return path;
+  }
+
   /** Eine schmale Zeile ueber der Eingabe: Bezug als Chip (jeder Teil einzeln entfernbar, per Knopf neu
    *  waehlbar), rechts Neues Gespraech und klein/gross. */
   private renderBar(): void {
     this.barEl.empty();
-    const f = this.activeScopeFile();
+    const f = this.activeNote();
     const teile = this.s.bezug?.teile ?? [];
     if (f) {
       const chip = this.barEl.createDiv({ cls: "sb-chat-chip", attr: { title: f } });
@@ -254,6 +278,8 @@ export class ChatView extends ItemView {
       const el = this.listEl.createDiv({ cls: `sb-chat-msg sb-chat-${t.rolle}${t.fehler ? " sb-chat-error" : ""}` });
       if (t.rolle === "assistent") {
         void MarkdownRenderer.render(this.app, t.text, el.createDiv({ cls: "sb-chat-md" }), this.lastFile ?? "", this);
+        const quellen = nachgeschlagen(t);
+        if (quellen) void MarkdownRenderer.render(this.app, quellen, el.createDiv({ cls: "sb-chat-quellen" }), this.lastFile ?? "", this);
         if (t.meta) el.createDiv({ cls: "sb-chat-meta", text: t.meta });
         // Knoepfe nur an der aktuell offenen Frage
         if (t.karte && this.s.karte && t.karte.id === this.s.karte.id && t === last) {
@@ -291,7 +317,9 @@ export class ChatView extends ItemView {
     this.s.busy = true;
     this.inputEl.value = "";
     this.grow();
-    const history = this.s.turns.filter((t) => !t.fehler).slice(-4).map((t) => ({ rolle: t.rolle, text: t.text }));
+    // das Gespraech geht mit; wie viel davon, entscheidet core/chat.ts (Budget, juengstes zuerst)
+    const history = this.s.turns.filter((t) => !t.fehler).slice(-20)
+      .map((t) => ({ rolle: t.rolle, text: t.text, gelesen: t.gelesen?.map((g) => g.name) }));
     // Frage-Modus: getippter Text ist eine Einordnung zur offenen Frage, keine neue Frage
     const inCard = this.s.karte !== null && !skill && frage !== "";
     const cardMode = inCard || skill?.quelle === "fragen";
@@ -305,19 +333,40 @@ export class ChatView extends ItemView {
     const started = Date.now();
     let timer: number | null = null;
     const req: Record<string, unknown> = { frage, skill: skill?.name ?? (inCard ? FRAGEN_SKILL.name : null),
-                                           ziel: { datei: this.activeScopeFile() ?? "" }, bezug: this.s.bezug,
-                                           verlauf: history };
+                                           ziel: { datei: this.activeScopeFile() ?? "", notiz: this.activeNote() ?? "" },
+                                           bezug: this.s.bezug, verlauf: history };
     if (cardMode) req.ueberspringen = this.s.skip;
     if (extra?.karte) req.karte = extra.karte;
     if (inCard && this.s.karte) req.karte_offen = this.s.karte.id;
+    // Wartezeile: der Ablauf - Runde, Werkzeug, was es tut - und wie lange schon (die letzten Schritte)
+    const ablauf: Fortschritt[] = [];
+    const zeige = () => {
+      if (!pending) return;
+      const s = `${Math.round((Date.now() - started) / 1000)} s`;
+      // die Liste scrollt mit, solange sie unten steht - sonst laegen neue Schritte unter der Kante
+      const list = this.listEl;
+      const unten = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+      pending.empty();
+      if (!ablauf.length) {
+        pending.setText(`denkt nach … ${s}`);
+      } else {
+        const zeilen = ablauf.slice(-6);
+        zeilen.forEach((f, i) => {
+          const jetzt = i === zeilen.length - 1;
+          pending.createDiv({ cls: `sb-chat-schritt${jetzt ? "" : " sb-muted"}`,
+                              text: `Runde ${f.runde} · ${f.werkzeug ? `${f.werkzeug} – ` : ""}${f.text}${jetzt ? ` … ${s}` : ""}` });
+        });
+      }
+      if (unten) list.scrollTop = list.scrollHeight;
+    };
     const onStart = () => {
-      pending?.setText("denkt nach …");
-      timer = window.setInterval(() => pending?.setText(`denkt nach … ${Math.round((Date.now() - started) / 1000)} s`), 1000);
+      zeige();
+      timer = window.setInterval(zeige, 1000);
     };
     let r: ChatAnswer | null;
     if (!viaEngine) {
       onStart();
-      r = await this.plugin.askChat(req as ChatRequest);
+      r = await this.plugin.askChat(req as ChatRequest, (f) => { ablauf.push(f); zeige(); });
     } else if (!this.plugin.isDesktop) {
       r = { ok: false, grund: "„Offene Fragen“ gibt es nur am Desktop – dort läuft die Engine." };
     } else {
@@ -335,8 +384,13 @@ export class ChatView extends ItemView {
       const woher = r.bezug?.herkunft ? ` (${r.bezug.herkunft})` : "";
       const meta = [r.bezug?.anzeige?.length ? `Bezug${woher}: ${r.bezug.anzeige.join(", ")}` : "",
                     r.karte ? `${r.karte.offen} offen` : "",
+                    // was die Schleife tat: nachgeschlagen (Runden), nicht noetig, oder Werkzeuge aus
+                    r.ohneWerkzeuge ? `Werkzeuge nicht verfügbar (${r.ohneWerkzeuge})`
+                      : r.runden && !r.schritte?.length ? "ohne Nachschlagen"
+                        : r.runden ? `${r.runden} ${r.runden === 1 ? "Runde" : "Runden"}` : "",
                     r.dauer_s ? `${r.dauer_s} s` : ""].filter(Boolean).join(" · ");
-      this.s.turns.push({ rolle: "assistent", text: r.antwort, meta, karte: r.karte ?? undefined });
+      this.s.turns.push({ rolle: "assistent", text: r.antwort, meta, karte: r.karte ?? undefined,
+                          gelesen: r.gelesen, schritte: r.schritte });
     } else {
       const grund = r?.grund ?? "Keine Antwort von der Engine.";
       this.s.turns.push({ rolle: "assistent", fehler: true,

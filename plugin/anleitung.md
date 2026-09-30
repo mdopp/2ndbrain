@@ -168,7 +168,21 @@ Begriff auf, der im Kanon fehlt, schlägt 2ndBrain eine Erweiterung vor – als 
 Sprechblase in der linken Leiste oder Befehl „Fragen an den Vault (Chat)“. Die Antworten kommen nur
 aus deinem Vault, mit Links zu den Quellen.
 
-- **Bezug:** Die offene Notiz ist automatisch der Bezug; ✕ fragt ohne sie.
+- **Bezug:** Die offene Notiz ist automatisch der Bezug, ihr Inhalt geht mit; ✕ fragt ohne sie.
+- **Gespräch:** Nachfragen („und wer kümmert sich darum?“) verstehen die vorigen Antworten – etwa die
+  letzten 3–4k Token des Gesprächs gehen mit. „Neues Gespräch“ fängt von vorn an.
+- **Nachschlagen:** Reicht das Vorbereitete nicht, schlägt der Chat selbst nach – in allem, was der
+  Vault weiß, auch im Domain Atlas und in der Systemübersicht: suchen, lesen, **Wege** zwischen zwei
+  Punkten („Wie hängen das Kundenportal und das Lagersystem zusammen?“ – die Stationen dazwischen sind
+  die Antwort) und der **Umkreis** eines Punkts („Wer ist alles betroffen, wenn das Altsystem abgelöst
+  wird?“). Dazu filtert er wie die Übersichten: **Aufgaben** („Was ist bei Anna überfällig?“), **Log**
+  („Welche Beschlüsse gab es seit dem 15.09. zum Portal?“), **Termine** mit dem Kalender („Welche Termine
+  habe ich nächste Woche zum Portal?“) und **Felder** der Notizen („Welche Systeme haben keinen Owner?“) –
+  die Zahlen rechnet der Code. Den **Domain Atlas** fragt er wie dessen eigener Agent: Nachrichten nach
+  Event, Command oder Query samt Sender, Empfänger und Owner, Prozesse mit ihren Schritten, Teams mit ihren
+  Kontexten und das Domänenmodell eines Kontexts (Fachobjekte mit Stereotyp und Relationen). Die Wartezeile zeigt Runde für Runde, welches Werkzeug er gerade
+  aufruft; unter der Antwort steht, was er nachgeschlagen hat (anklickbar) und wie viele Runden es
+  waren. Das dauert meist 5–20 Sekunden, Bilder weiterhin etwa eine.
 - **Vorlagen ▾:** fertige Rezepte – Briefing für einen Termin, 1:1-Vorbereitung, Nachfassen, Stand
   eines Themas, Was hat sich bewegt, Risiken & Entscheidungen – und Bilder (Themenbaum, Verlauf,
   Beteiligte, Reihen), die ohne Modell in etwa einer Sekunde gezeichnet werden.
@@ -187,7 +201,7 @@ es beim nächsten Lauf. Unterwegs erreicht das Handy den Modell-Server zum Beisp
 | Einstellung | Wofür |
 |---|---|
 | Anleitung | öffnet diese Seite |
-| Python, Engine | Die Engine rechnet am Desktop. „Installieren / Aktualisieren“; „Einrichten“ prüft den Vault und legt Fehlendes an – auch diese Anleitung. |
+| Python, Engine | Die Engine rechnet am Desktop. „Installieren / Aktualisieren“ nimmt das Engine-Paket, das dem Plugin beiliegt (Abhängigkeiten kommen aus dem Internet); lehnt das Python des Systems ab (am Mac mit Homebrew), bekommt die Engine eine eigene Umgebung in `~/.2ndbrain/venv`. Python sucht das Plugin auch in Homebrew, python.org und pyenv – sonst den Pfad eintragen, etwa `/opt/homebrew/bin/python3`. „Einrichten“ prüft den Vault und legt Fehlendes an – auch diese Anleitung. |
 | Automatik alle … Minuten | Lauf im Hintergrund; 0 = aus |
 | Ich | deine Personenseite – trennt „Meine Aufgaben“ von „Nachfassen“ |
 | Worum es in diesem Vault geht | ein Satz, der den Modellen den Rahmen gibt |

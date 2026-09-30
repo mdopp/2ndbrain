@@ -8,14 +8,15 @@ Kontext-Verzeichnis, Auflösen, MCP-Belege) und schlägt Änderungen vor
 `2ndbrain einrichten` zeigt, welcher Kanon gefunden wurde.
 
 Allgemeines Modell (jedes Element mit id, name, aliases, quelle):
-  kontexte     owner [..], subdomain, beschreibung
-  subdomaenen  art (core/supporting/generic), reife (Lebenszyklus), beschreibung
-  objekte      Fachbegriffe: namen [..], begriff, definition, kontext, synonyme
+  kontexte     owner [..], subdomain, reife (Lebenszyklus), beschreibung
+  subdomaenen  art (core/supporting/generic), reife, beschreibung
+  objekte      Fachbegriffe (Domänenmodell): namen [..], begriff, definition, kontext, synonyme, stereotyp,
+               relationen [{verb, ziel, kardinalitaet, beschreibung}]
   teams        beschreibung
-  externe      kategorie (Rolle gegenüber der eigenen Organisation)
-  nachrichten  produzenten [..], konsumenten [..]
-  beziehungen  von, zu, typ
-  ablaeufe
+  externe      kategorie (Rolle gegenüber der eigenen Organisation), beschreibung
+  nachrichten  produzenten [..], konsumenten [..], typ, reife, beschreibung
+  beziehungen  von, zu, typ, reife, beschreibung
+  ablaeufe     betrifft [..] (Kontexte), schritte [{kontext, nachricht}] in Reihenfolge, reife, beschreibung
 
 Formate (`kanon` in .2ndbrain/local.config.json: {"format": …, "pfad": …}):
   domain-atlas  YAML-Dateien je Element unter <repo>/canon/{contexts,subdomains,object-refs,teams,
@@ -201,6 +202,21 @@ def _reife(v) -> str:
     return ""
 
 
+def _relationen(v) -> list[dict]:
+    """Relationen eines Fachobjekts (Domänenmodell): [{verb, ziel, kardinalitaet, beschreibung}]."""
+    return [{"verb": str(r.get("verb") or "").strip(), "ziel": str(r.get("ziel") or "").strip(),
+             "kardinalitaet": str(r.get("kardinalitaet") or "").strip(), "beschreibung": str(r.get("beschreibung") or "").strip()}
+            for r in _list(v) if isinstance(r, dict) and r.get("ziel")]
+
+
+def _schritte(v, kontext_key: str, nachricht_key: str) -> list[dict]:
+    """Schritte eines Ablaufs in Reihenfolge (`order`, sonst wie notiert): [{kontext, nachricht}]."""
+    items = [x for x in _list(v) if isinstance(x, dict)]
+    items = sorted(enumerate(items), key=lambda ix: (ix[1].get("order") if isinstance(ix[1].get("order"), int) else ix[0], ix[0]))
+    return [{"kontext": str(x.get(kontext_key) or "").strip(), "nachricht": str(x.get(nachricht_key) or "").strip()}
+            for _, x in items if x.get(kontext_key) or x.get(nachricht_key)]
+
+
 # ------------------------------------------------------------------ Adapter
 
 def _domain_atlas(root: Path | None) -> dict | None:
@@ -222,7 +238,8 @@ def _domain_atlas(root: Path | None) -> dict | None:
     k: dict = {"format": "domain-atlas", "root": root}
     k["kontexte"] = [{"id": d.get("id"), "name": d.get("name"), "datei": d["_datei"],
                       "owner": [str(o) for o in _list(d.get("owner"))], "subdomain": d.get("primarySubdomain") or "",
-                      "beschreibung": d.get("description") or "", "aliases": _list(d.get("aliases")), "quelle": q}
+                      "reife": _reife(d), "beschreibung": d.get("description") or "",
+                      "aliases": _list(d.get("aliases")), "quelle": q}
                      for q, d in raw["kontexte"]]
     k["subdomaenen"] = [{"id": d.get("id"), "name": d.get("name"), "aliases": _list(d.get("aliases")),
                          "art": str(d.get("kind") or ""), "beschreibung": str(d.get("description") or ""),
@@ -233,11 +250,13 @@ def _domain_atlas(root: Path | None) -> dict | None:
                      + _list(d.get("aliases")), "begriff": d.get("displayName") or d.get("concept"),
                      "definition": d.get("definition"), "kontext": d.get("context"),
                      "synonyme": _list(d.get("aliases")), "name": d.get("displayName") or d.get("concept"),
+                     "stereotyp": str(d.get("stereotyp") or ""), "relationen": _relationen(d.get("relationen")),
                      "aliases": _list(d.get("aliases")), "quelle": q} for q, d in raw["objekte"]]
     k["teams"] = [{"id": d.get("id"), "name": d.get("name"), "aliases": _list(d.get("aliases")),
                    "beschreibung": str(d.get("description") or ""), "quelle": q}
                   for q, d in raw["teams"]]
     k["externe"] = [{"id": d.get("id"), "name": d.get("name"), "kategorie": d.get("category") or "",
+                     "beschreibung": str(d.get("description") or ""),
                      "aliases": _list(d.get("aliases")), "quelle": q} for q, d in raw["externe"]]
     k["nachrichten"] = [{"id": d.get("id"), "name": d.get("name"), "typ": str(d.get("type") or ""),
                          "reife": _reife(d.get("status")),
@@ -251,8 +270,13 @@ def _domain_atlas(root: Path | None) -> dict | None:
                          "aliases": [], "quelle": q}
                         for q, d in raw["nachrichten"]]
     k["beziehungen"] = [{"id": d.get("id"), "von": str(d.get("from")), "zu": str(d.get("to")), "typ": d.get("type") or "",
+                         "reife": _reife(d), "beschreibung": str(d.get("description") or ""),
                          "name": d.get("name"), "aliases": [], "quelle": q} for q, d in raw["beziehungen"]]
-    k["ablaeufe"] = [{"id": d.get("id"), "name": d.get("name"), "aliases": [], "quelle": q} for q, d in raw["ablaeufe"]]
+    k["ablaeufe"] = [{"id": d.get("id"), "name": d.get("name"), "reife": _reife(d),
+                      "beschreibung": str(d.get("description") or ""),
+                      "betrifft": [str(x) for x in _list(d.get("appliesTo")) if x],
+                      "schritte": _schritte(d.get("steps"), "context", "ref"),
+                      "aliases": [], "quelle": q} for q, d in raw["ablaeufe"]]
     k["_roh"] = {q.split("/")[1].rsplit(".", 1)[0]: (q, d) for items in raw.values() for q, d in items}
     return k
 
@@ -285,7 +309,8 @@ def _einfach(path: Path | None) -> dict | None:
     k: dict = {"format": "einfach", "root": path, "name": doc.get("name")}
     k["kontexte"] = [{"id": eid(x), "name": x.get("name") or eid(x), "datei": eid(x),
                       "owner": [str(o) for o in _list(x.get("owner"))], "subdomain": str(x.get("subdomain") or ""),
-                      "beschreibung": str(x.get("beschreibung") or ""), "aliases": al(x, "aliases"), "quelle": q}
+                      "reife": str(x.get("reife") or ""), "beschreibung": str(x.get("beschreibung") or ""),
+                      "aliases": al(x, "aliases"), "quelle": q}
                      for x in items("kontexte")]
     k["subdomaenen"] = [{"id": eid(x), "name": x.get("name") or eid(x), "aliases": al(x, "aliases"),
                          "art": str(x.get("art") or ""), "reife": str(x.get("reife") or ""),
@@ -294,12 +319,14 @@ def _einfach(path: Path | None) -> dict | None:
     k["objekte"] = [{"id": eid(x), "namen": [x.get("name")] + al(x, "synonyme", "aliases"), "begriff": x.get("name"),
                      "definition": x.get("definition"), "kontext": x.get("kontext"),
                      "synonyme": al(x, "synonyme", "aliases"), "name": x.get("name"),
+                     "stereotyp": str(x.get("stereotyp") or ""), "relationen": _relationen(x.get("relationen")),
                      "aliases": al(x, "synonyme", "aliases"), "quelle": q}
                     for x in items("begriffe") + items("objekte")]
     k["teams"] = [{"id": eid(x), "name": x.get("name") or eid(x), "aliases": al(x, "aliases"),
                    "beschreibung": str(x.get("beschreibung") or ""), "quelle": q}
                   for x in items("teams")]
     k["externe"] = [{"id": eid(x), "name": x.get("name") or eid(x), "kategorie": str(x.get("kategorie") or ""),
+                     "beschreibung": str(x.get("beschreibung") or ""),
                      "aliases": al(x, "aliases"), "quelle": q} for x in items("externe")]
     k["nachrichten"] = [{"id": eid(x), "name": x.get("name"), "typ": str(x.get("typ") or x.get("type") or ""),
                          "reife": str(x.get("reife") or ""), "beschreibung": str(x.get("beschreibung") or ""),
@@ -309,9 +336,13 @@ def _einfach(path: Path | None) -> dict | None:
                         for x in items("nachrichten")]
     k["beziehungen"] = [{"id": str(x.get("id") or f"{x.get('von')}-{x.get('zu')}"), "von": str(x.get("von")),
                          "zu": str(x.get("zu")), "typ": str(x.get("typ") or ""), "name": x.get("name"),
+                         "reife": str(x.get("reife") or ""), "beschreibung": str(x.get("beschreibung") or ""),
                          "aliases": [], "quelle": q}
                         for x in (doc.get("beziehungen") or []) if isinstance(x, dict) and x.get("von") and x.get("zu")]
-    k["ablaeufe"] = [{"id": eid(x), "name": x.get("name") or eid(x), "aliases": [], "quelle": q} for x in items("ablaeufe")]
+    k["ablaeufe"] = [{"id": eid(x), "name": x.get("name") or eid(x), "reife": str(x.get("reife") or ""),
+                      "beschreibung": str(x.get("beschreibung") or ""), "betrifft": al(x, "betrifft"),
+                      "schritte": _schritte(x.get("schritte"), "kontext", "nachricht"),
+                      "aliases": [], "quelle": q} for x in items("ablaeufe")]
     return k
 
 

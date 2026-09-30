@@ -702,15 +702,19 @@ def t_contexts_index_is_readonly_reference_list():
 def t_kanon_nachrichten_und_landkarte():
     """Nachrichten aus dem Domain Atlas kommen vollstaendig an: Typ, Reife, und Empfaenger in der Form
     `{node: …, lifecycle: …}` als ID mit eigener Reife - frueher wurde daraus der Text "{'node': …}".
-    Das Kontext-Verzeichnis fuehrt Subdomaenen und Nachrichten fuer das Plugin (Bild im Chat)."""
+    Das Kontext-Verzeichnis fuehrt Subdomaenen, Kontexte und Nachrichten mit Reife und Beschreibung,
+    dazu Fachobjekte, Teams, Externe, Beziehungen und Ablaeufe (Schritte in Reihenfolge) - fuer das
+    Plugin (Bild im Chat, Graph der Chat-Werkzeuge, auch am Handy)."""
     d = temp_vault()
     try:
         canon = d / "domain-atlas" / "canon"
         for sub, name, body in (
-                ("subdomains", "sd-lagerhof", "id: sd-lagerhof\nname: Lagerhof\n"),
+                ("subdomains", "sd-lagerhof", "id: sd-lagerhof\nname: Lagerhof\nkind: core\ndescription: Hof und Halle.\n"
+                 "status:\n  lifecycle: agreed\n"),
                 ("subdomains", "sd-auftragswesen", "id: sd-auftragswesen\nname: Auftragswesen\n"),
                 ("contexts", "ctx-wareneingang", "id: ctx-wareneingang\nname: Wareneingang\nprimarySubdomain: sd-lagerhof\n"),
-                ("contexts", "ctx-verladung", "id: ctx-verladung\nname: Verladung\nprimarySubdomain: sd-lagerhof\n"),
+                ("contexts", "ctx-verladung", "id: ctx-verladung\nname: Verladung\nprimarySubdomain: sd-lagerhof\n"
+                 "description: |\n  Lädt Paletten\n  auf den Lkw.\nstatus:\n  lifecycle: proposed\n"),
                 ("contexts", "ctx-auftragsannahme", "id: ctx-auftragsannahme\nname: Auftragsannahme\n"
                                                     "primarySubdomain: sd-auftragswesen\nowner: [team-auftrag]\n"),
                 ("messages", "msg-sendung-suchen", "id: msg-sendung-suchen\nname: finde \"Sendung\" nach Nummer\n"
@@ -718,7 +722,20 @@ def t_kanon_nachrichten_und_landkarte():
                  "status:\n  lifecycle: review\n"),
                 ("messages", "msg-palette-gebildet", "id: msg-palette-gebildet\nname: Palette gebildet\ntype: event\n"
                  "producers:\n  - ctx-verladung\nconsumers:\n  - ctx-auftragsannahme\n"
-                 "  - node: ctx-wareneingang\n    lifecycle: proposed\nstatus:\n  lifecycle: agreed\n")):
+                 "  - node: ctx-wareneingang\n    lifecycle: proposed\nstatus:\n  lifecycle: agreed\n"
+                 "description: Palette fertig | verladebereit.\n"),
+                ("object-refs", "obj-palette", "id: obj-palette\nconcept: Palette\ndisplayName: Palette\n"
+                 "context: ctx-verladung\ndefinition: Ladungsträger.\naliases: [Pallet]\nstereotyp: entity\n"
+                 "relationen:\n  - verb: liegt-auf\n    ziel: obj-ladeeinheit\n    kardinalitaet: 0..n\n"),
+                ("teams", "team-auftrag", "id: team-auftrag\nname: Team Auftrag\ndescription: Nimmt Aufträge an.\n"),
+                ("externals", "ext-spediteur", "id: ext-spediteur\nname: Spediteur\ncategory: partner\ndescription: Fährt.\n"),
+                ("relations", "rel-verladung-auftrag", "id: rel-verladung-auftrag\nfrom: ctx-verladung\n"
+                 "to: ctx-auftragsannahme\ntype: Customer-Supplier\ndescription: Liefert Paletten.\n"
+                 "status:\n  lifecycle: proposed\n"),
+                ("processes", "proc-verladen", "id: proc-verladen\nname: Verladen\nappliesTo: [ctx-verladung]\nsteps:\n"
+                 "  - order: 1\n    context: ctx-auftragsannahme\n    ref: msg-sendung-suchen\n"
+                 "  - order: 0\n    context: ctx-verladung\n    ref: msg-palette-gebildet\n"
+                 "description: Erst Palette, dann Suche.\n")):
             (canon / sub).mkdir(parents=True, exist_ok=True)
             (canon / sub / f"{name}.yaml").write_text(body, encoding="utf-8", newline="\n")
         import kanon
@@ -739,6 +756,18 @@ def t_kanon_nachrichten_und_landkarte():
            "| `ctx-auftragsannahme`, `ctx-wareneingang` (proposed) |" in text, text)
         ok("| `msg-sendung-suchen` finde \"Sendung\" nach Nummer | query | review "
            "| `ctx-wareneingang`, `ctx-verladung` | `ctx-auftragsannahme` |" in text, text)
+        # Reife und Beschreibung (einzeilig, ohne Tabellen-Strich), der Rest des Kanons
+        ok("| `sd-lagerhof` | Lagerhof | 2 | core | agreed | Hof und Halle. |" in text, text)
+        ok("| `ctx-verladung` Verladung | sd-lagerhof |  | proposed | Lädt Paletten auf den Lkw. |" in text, text)
+        ok("(proposed) | Palette fertig / verladebereit. |" in text, text)
+        ok("## Fachobjekte" in text and "| `obj-palette` Palette | `ctx-verladung` | entity | Pallet "
+           "| liegt-auf `obj-ladeeinheit` (0..n) | Ladungsträger. |" in text, text)
+        ok("| `team-auftrag` Team Auftrag | Nimmt Aufträge an. |" in text, text)
+        ok("| `ext-spediteur` Spediteur | partner | Fährt. |" in text, text)
+        ok("| `rel-verladung-auftrag` rel-verladung-auftrag | Customer-Supplier | proposed | `ctx-verladung` "
+           "| `ctx-auftragsannahme` | Liefert Paletten. |" in text, text)
+        ok("| `proc-verladen` Verladen |  | `ctx-verladung` | `ctx-verladung`: `msg-palette-gebildet` → "
+           "`ctx-auftragsannahme`: `msg-sendung-suchen` | Erst Palette, dann Suche. |" in text, text)
     finally:
         restore_vault()
 
@@ -5258,7 +5287,12 @@ def t_systemuebersicht_and_atlas_questions():
         ok("delta.cep.tarom -[abloesung]-> delta.altsys 'löst ab'" in c4, c4)
         ok("-[belegt]->" in c4 and "gemeinsam genannt (2×)" in c4, c4)
         ok("link obsidian://open?" in c4 and "view abloesung_altsys" in c4, c4)
-        ok("```mermaid" in (d / "reports" / "systemuebersicht.md").read_text(encoding="utf-8"), "Obsidian-Bild")
+        report_text = (d / "reports" / "systemuebersicht.md").read_text(encoding="utf-8")
+        ok("```mermaid" in report_text, "Obsidian-Bild")
+        # Verbindungen als Tabelle fuer den Graphen des Chats: Abloesung und belegt (mit erstem Beleg)
+        ok("## Verbindungen" in report_text and "| [[tarom|Tarom]] | [[altsys|AltSYS]] | löst ab |  |" in report_text
+           and "| [[altsys|AltSYS]] | [[tarom|Tarom]] | belegt 2× | 2026-09-20 [[cep]]: Tarom sendet Status an AltSYS "
+           in report_text, report_text)
         eq(r["systeme"], 3, "Systeme:")
 
         g = av.generate(today)
@@ -6025,8 +6059,8 @@ TESTS = [
     ("Glossar erkennt ueberdeckten Personen-Begriff", t_glossary_finds_shadowed_person_term),
     ("Glossar erkennt Ueberdeckung ueber Dateinamen-Fallback", t_glossary_finds_shadowed_term_via_filename_fallback),
     ("Contexts-Index ist read-only Verweisliste", t_contexts_index_is_readonly_reference_list),
-    ("Kanon: Nachrichten vollstaendig (Typ, Reife, {node}), Landkarte im Kontext-Verzeichnis",
-     t_kanon_nachrichten_und_landkarte),
+    ("Kanon: Nachrichten vollstaendig (Typ, Reife, {node}), Verzeichnis mit Beschreibungen, Objekten, Teams, "
+     "Externen, Beziehungen, Ablaeufen", t_kanon_nachrichten_und_landkarte),
     ("Kontexte und Systeme: Vorschlaege mit Beleg, Haken ordnen zu und nehmen zurueck",
      t_kontext_systeme_vorschlaege_und_haken),
     ("Personen-Auflosung inkl. Mehrdeutigkeit", t_person_resolution),
@@ -6162,8 +6196,8 @@ TESTS = [
      t_clarify_checked_cards_are_applied_and_archived),
     ("Wer kuemmert sich: Rolle nennt das Thema, Oberthema mit Unterthemen-Beteiligten, keine Fetzen",
      t_who_roles_and_subtree_participants),
-    ("Systemuebersicht (LikeC4) + Fragen an den Atlas: Bereich, Abloesung, Belege, Kunden nie Partner, Review",
-     t_systemuebersicht_and_atlas_questions),
+    ("Systemuebersicht (LikeC4) + Fragen an den Atlas: Bereich, Abloesung, Belege, Verbindungstabelle, Kunden nie "
+     "Partner, Review", t_systemuebersicht_and_atlas_questions),
     ("Chat: offene Fragen nacheinander, Text = Einordnung, Themenname = Bereich, später, Knopf",
      t_chat_question_mode_answers_one_by_one),
     ("Systemuebersicht: Modell-Ordner gehoert einem Vault, schreibt nur bei Aenderung, taeglich in der Automatik",

@@ -18,8 +18,8 @@ export interface Spiegel {
 
 export interface SecondBrainSettings {
   spiegel: Spiegel;
-  pythonPath: string;        // leer = automatisch (py, python, python3)
-  engineQuelle: string;      // leer = passende Version von GitHub; Entwicklung: "-e <Pfad zu engine>"
+  pythonPath: string;        // leer = automatisch (PATH, Homebrew, python.org, pyenv; eigene Umgebung zuerst)
+  engineQuelle: string;      // leer = dem Plugin beigelegt, sonst GitHub; Entwicklung: "-e <Pfad zu engine>"
   autoIntervalMin: number;   // 0 = aus
   likec4Autostart: boolean;  // Systemuebersicht (LikeC4-Explorer) mit dem Plugin starten
   likec4Port: number;
@@ -101,7 +101,8 @@ export class SecondBrainSettingTab extends PluginSettingTab {
     new Setting(el)
       .setName("Python")
       .setDesc(py ? `Erkannt: ${py.executable} (Python ${py.version}, über „${py.command}“). Leer = automatisch suchen.`
-        : "Leer = automatisch suchen (py, python, python3; mindestens 3.10). Sonst Programm oder voller Pfad.")
+        : "Leer = automatisch suchen (PATH und die üblichen Orte: Homebrew, python.org, pyenv; mindestens 3.10). "
+          + "Sonst Programm oder voller Pfad, am Mac etwa /opt/homebrew/bin/python3.")
       .addText((t) => t.setPlaceholder("automatisch").setValue(this.plugin.settings.pythonPath)
         .onChange(async (v) => {
           this.plugin.settings.pythonPath = v.trim();
@@ -138,9 +139,10 @@ export class SecondBrainSettingTab extends PluginSettingTab {
     }
     new Setting(el)
       .setName("Engine-Quelle")
-      .setDesc("Leer = die zur Plugin-Version passende Engine von GitHub. Für die Entwicklung: "
-        + "„-e <Pfad zum Ordner engine im Code-Repo>“ (dann gilt jede Änderung sofort).")
-      .addText((t) => t.setPlaceholder("GitHub (passende Version)").setValue(this.plugin.settings.engineQuelle)
+      .setDesc("Leer = die Engine, die dem Plugin beiliegt (sonst die passende Version von GitHub). Für die "
+        + "Entwicklung: „-e <Pfad zum Ordner engine im Code-Repo>“ (dann gilt jede Änderung sofort). Lehnt das "
+        + "Python des Systems die Installation ab (Homebrew), bekommt die Engine eine eigene Umgebung in ~/.2ndbrain/venv.")
+      .addText((t) => t.setPlaceholder("beigelegt (sonst GitHub)").setValue(this.plugin.settings.engineQuelle)
         .onChange(async (v) => {
           this.plugin.settings.engineQuelle = v.trim();
           await this.plugin.saveSettings();

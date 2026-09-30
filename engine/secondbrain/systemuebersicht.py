@@ -451,7 +451,44 @@ def report(systems: dict, topics: dict, rels: dict, target: Path, check: str, da
         lines += [f"- [[{x['slug']}|{x['name']}]] → [[{x['bereich']}|{topics[x['bereich']]['title']}]] ({x['quelle']})"
                   for x in unsure]
         lines.append("")
+    lines += connection_table(systems, rels)
     return "\n".join(lines)
+
+
+def _zelle(text: str) -> str:
+    return " ".join(str(text or "").split()).replace("|", "/")
+
+
+_HAND_RE = re.compile(r"^\s*\[\[[^\]]*\]\]\s*[–—-]?\s*")
+
+
+def connection_table(systems: dict, rels: dict) -> list[str]:
+    """Alle Verbindungen als Tabelle: von Hand (Feld `verbindungen`), Ablösung (`ersetzt`), belegt aus
+    den Logs. Das Plugin liest sie für den Graphen seines Chats (Wege, Umkreis) - auch am Handy."""
+    rows: list[tuple[str, str, str, str]] = []
+    for s, x in sorted(systems.items()):
+        if x["aus"]:
+            continue
+        for v in x["verbindungen"]:
+            m = _LINK_RE.search(v)
+            ziel = m.group(1).strip() if m else ""
+            if ziel in systems and ziel != s:
+                was = _HAND_RE.sub("", v).strip()
+                rows.append((s, ziel, "von Hand" + (f": {was}" if was else ""), ""))
+        rows += [(s, old, "löst ab", "") for old in x["ersetzt"] if old in systems and old != s]
+    for (a, b), e in sorted(rels.items()):
+        bel = e["belege"][0] if e["belege"] else None
+        rows.append((a, b, f"belegt {e['n']}×", f"{bel[0]} [[{bel[1]}]]: {bel[2]}" if bel else ""))
+    if not rows:
+        return []
+
+    def name(s: str) -> str:
+        return f"[[{s}|{_zelle(systems[s]['name'])}]]"
+    return (["## Verbindungen", "",
+             "> Für Chat und Suche: von Hand (Feld `verbindungen`), Ablösung (`ersetzt`) und belegt – zwei Systeme "
+             "gemeinsam in Log-Einträgen mit Schnittstellen-Wort, ab zwei Einträgen, Richtung offen.", "",
+             "| von | an | Art | Beleg |", "|---|---|---|---|"]
+            + [f"| {name(a)} | {name(b)} | {_zelle(art)} | {_zelle(beleg)} |" for a, b, art, beleg in rows] + [""])
 
 
 # ------------------------------------------------------------------ Lauf

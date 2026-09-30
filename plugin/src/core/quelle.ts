@@ -6,7 +6,7 @@ export type Frontmatter = Record<string, unknown>;
 
 export interface VaultSource {
   /** Markdown-Dateien in einem Ordner (Pfade relativ zum Vault, mit "/"); `recursive`
-   *  auch in Unterordnern. Reihenfolge beliebig - sortiert wird in der Logik. */
+   *  auch in Unterordnern, `""` ist der ganze Vault. Reihenfolge beliebig - sortiert wird in der Logik. */
   list(folder: string, recursive: boolean): string[];
   /** Inhalt; null, wenn die Datei fehlt oder nicht lesbar ist. */
   read(path: string): Promise<string | null>;

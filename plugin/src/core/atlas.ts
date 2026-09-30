@@ -1,30 +1,52 @@
 // Domain Atlas im Vault: das Kontext-Verzeichnis `entities/contexts/_index.md` (kontexte.py) fuehrt
-// Subdomaenen, Kontexte und die Nachrichten zwischen ihnen. Der Chat liest es hier - auch am Handy,
-// wo der Atlas selbst fehlt - und zeichnet daraus, wie Kontexte zusammenspielen.
+// Subdomaenen, Kontexte und die Nachrichten zwischen ihnen, dazu Fachobjekte, Teams, Externe,
+// Beziehungen und Ablaeufe. Der Chat liest es hier - auch am Handy, wo der Atlas selbst fehlt -,
+// zeichnet daraus, wie Kontexte zusammenspielen, und baut damit seinen Graphen (core/graph.ts).
 
 import { asList } from "./entities";
 import { DIRS, VaultSource } from "./quelle";
 
 export const ATLAS_INDEX = `${DIRS.contexts}/_index.md`;
 
-export interface AtlasSubdomaene { id: string; name: string }
-export interface AtlasKontext { id: string; name: string; sd: string; owner: string[] }
+// Reife, Art und Beschreibung stehen nur in neueren Verzeichnissen - dann als Feld, sonst fehlt es
+export interface AtlasSubdomaene { id: string; name: string; art?: string; reife?: string; beschreibung?: string }
+export interface AtlasKontext { id: string; name: string; sd: string; owner: string[]; reife?: string; beschreibung?: string }
 export interface AtlasNachricht {
   id: string; name: string; typ: string; reife: string; von: string[]; an: string[];
   /** eigene Reife einzelner Kanten (`ctx-x (review)` im Verzeichnis) */
   kantenReife: Map<string, string>;
+  beschreibung?: string;
+}
+/** Fachobjekt, Team, Externer, Beziehung oder Ablauf - Felder so, wie das Verzeichnis sie fuehrt. */
+export interface AtlasEintrag {
+  id: string; name: string; art: string;
+  /** Anzeige: [Spalte, Wert] ohne Beschreibung */
+  felder: [string, string][];
+  /** [Spalte, ID]: worauf der Eintrag verweist (Kontexte, Nachrichten) - Kanten im Graphen */
+  bezuege: [string, string][];
+  beschreibung: string;
 }
 export interface Atlas {
   subdomaenen: Map<string, AtlasSubdomaene>;
   kontexte: Map<string, AtlasKontext>;
   nachrichten: AtlasNachricht[];
+  weitere: Map<string, AtlasEintrag>;
 }
 
 const ID_RE = /`([^`]+)`/;
+// Tabellen des Verzeichnisses jenseits von Subdomaenen, Kontexten und Nachrichten (Kopf -> Art)
+const WEITERE: Record<string, string> = {
+  objekt: "Fachobjekt", team: "Atlas-Team", externer: "Externer", beziehung: "Beziehung", ablauf: "Ablauf",
+};
 
 function cells(line: string): string[] {
   const t = line.trim();
   return t.slice(1, t.endsWith("|") ? -1 : undefined).split("|").map((c) => c.trim());
+}
+
+/** Alle IDs in Backticks, in Reihenfolge, ohne Doppelte. */
+function idsIn(cell: string): string[] {
+  return [...new Set([...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter(Boolean))];
 }
 
 /** "`ctx-a` (review), `ctx-b`" -> [ids], {id: reife} */
@@ -40,8 +62,16 @@ function knoten(cell: string): [string[], Map<string, string>] {
 
 /** Das Verzeichnis lesen; null, wenn es fehlt oder keine Kontexte fuehrt. */
 export function parseAtlas(text: string): Atlas | null {
-  const atlas: Atlas = { subdomaenen: new Map(), kontexte: new Map(), nachrichten: [] };
+  const atlas: Atlas = { subdomaenen: new Map(), kontexte: new Map(), nachrichten: [], weitere: new Map() };
   let art = "";
+  let kopfzeile: string[] = [];
+  // Spalte nach ihrem Kopf (nur neuere Verzeichnisse haben Reife, Art, Beschreibung)
+  const spalte = (c: string[], name: "art" | "reife" | "beschreibung"): { art?: string; reife?: string; beschreibung?: string } => {
+    const i = kopfzeile.indexOf(name);
+    const z: { art?: string; reife?: string; beschreibung?: string } = {};
+    if (i > 0) z[name] = c[i] ?? "";
+    return z;
+  };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line.startsWith("|")) {
@@ -50,24 +80,43 @@ export function parseAtlas(text: string): Atlas | null {
     }
     const c = cells(line);
     const kopf = c[0].toLowerCase();
-    if (kopf === "subdomäne" || kopf === "subdomaene") { art = "sd"; continue; }
-    if (kopf === "kontext") { art = "ctx"; continue; }
-    if (kopf === "nachricht") { art = "msg"; continue; }
+    const neu = kopf === "subdomäne" || kopf === "subdomaene" ? "sd" : kopf === "kontext" ? "ctx"
+      : kopf === "nachricht" ? "msg" : WEITERE[kopf] ?? "";
+    if (neu) {
+      art = neu;
+      kopfzeile = c.map((x) => x.toLowerCase());
+      continue;
+    }
     if (/^:?-{3,}/.test(c[0])) continue;                  // Trennzeile
     const idm = ID_RE.exec(c[0]);
     if (!idm) continue;
     const id = idm[1];
     const rest = c[0].slice((idm.index ?? 0) + idm[0].length).trim();
     if (art === "sd") {
-      atlas.subdomaenen.set(id, { id, name: c[1] || id });
+      atlas.subdomaenen.set(id, { id, name: c[1] || id, ...spalte(c, "art"), ...spalte(c, "reife"),
+                                  ...spalte(c, "beschreibung") });
     } else if (art === "ctx") {
       atlas.kontexte.set(id, { id, name: rest || id, sd: c[1] ?? "",
-                               owner: (c[2] ?? "").split(",").map((o) => o.trim()).filter(Boolean) });
+                               owner: (c[2] ?? "").split(",").map((o) => o.trim()).filter(Boolean),
+                               ...spalte(c, "reife"), ...spalte(c, "beschreibung") });
     } else if (art === "msg") {
       const [von, rv] = knoten(c[3] ?? "");
       const [an, ra] = knoten(c[4] ?? "");
       atlas.nachrichten.push({ id, name: rest || id, typ: c[1] ?? "", reife: c[2] ?? "", von, an,
-                               kantenReife: new Map([...rv, ...ra]) });
+                               kantenReife: new Map([...rv, ...ra]), ...spalte(c, "beschreibung") });
+    } else if (art) {                                    // Fachobjekt, Team, Externer, Beziehung, Ablauf
+      const text = (i: number) => (c[i] ?? "").split("`").join("").trim();
+      const lang = kopfzeile.findIndex((k, i) => i > 0 && (k === "beschreibung" || k === "definition"));
+      const felder: [string, string][] = [];
+      for (let i = 1; i < kopfzeile.length; i++) {
+        if (i !== lang && text(i)) felder.push([kopfzeile[i], text(i)]);
+      }
+      // Relationen des Domaenenmodells tragen ihr Verb: "betrifft `obj-b` (0..n) · liegt-an `obj-c`"
+      const bezuege = c.slice(1).flatMap((cell, j): [string, string][] => (kopfzeile[j + 1] === "relationen"
+        ? [...cell.matchAll(/([^\s`·]+)\s+`([^`]+)`/g)].map((m): [string, string] => [m[1], m[2]])
+        : idsIn(cell).map((x): [string, string] => [kopfzeile[j + 1] ?? "", x])));
+      atlas.weitere.set(id, { id, name: rest || id, art, felder, beschreibung: lang > 0 ? text(lang) : "",
+                              bezuege: bezuege.filter(([, x]) => x !== id) });
     }
   }
   // aeltere Verzeichnisse ohne Subdomaenen-Tabelle: Namen aus der ID

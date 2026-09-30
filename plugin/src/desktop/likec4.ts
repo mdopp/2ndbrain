@@ -4,6 +4,8 @@
 // ueber die Shell, und beendet werden muss der ganze Prozessbaum (taskkill /T), sonst
 // bleibt node am Port haengen. Kein obsidian-Import (Tests).
 import { ChildProcess, execFile, spawn } from "child_process";
+import { homedir } from "os";
+import { erweiterterPfad } from "./python";
 
 export type ServerState = "aus" | "startet" | "läuft" | "fehler";
 
@@ -163,7 +165,9 @@ export class Likec4Server {
     }
     this.output = "";
     const args = [...cmd.slice(1), ...startArgs(paths.likec4_model, port)];
-    const env = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", BROWSER: "none" };
+    // Mac: npx/node liegen oft in Homebrew - der PATH des Programms kennt es nicht
+    const env = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", BROWSER: "none",
+                  ...(this.platform === "win32" ? {} : { PATH: erweiterterPfad(process.env.PATH ?? "", this.platform, homedir()) }) };
     let child: ChildProcess;
     try {
       child = isBatch(cmd[0], this.platform)

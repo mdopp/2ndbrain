@@ -2,12 +2,35 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Likec4Server, busyPort, findUrl, isBatch, lastLines, parseLsof, parseNetstat, quoteWin, startArgs }
   from "../src/desktop/likec4";
-import { Probe, findPython, parseProbe, pythonCandidates, versionOk } from "../src/desktop/python";
+import { Probe, erweiterterPfad, findPython, parseProbe, pythonCandidates, venvDir, venvPython, versionOk }
+  from "../src/desktop/python";
 
 test("Python-Kandidaten: eingetragen zuerst, dann py/python/python3 (Windows), ohne Doppelte", () => {
   assert.deepEqual(pythonCandidates("", "win32"), ["py", "python", "python3"]);
   assert.deepEqual(pythonCandidates("  C:\\Py\\python.exe ", "win32"), ["C:\\Py\\python.exe", "py", "python", "python3"]);
-  assert.deepEqual(pythonCandidates("python3", "linux"), ["python3", "python"]);
+  assert.deepEqual(pythonCandidates("", "win32", "C:\\Users\\anna"),
+                   ["C:\\Users\\anna\\.2ndbrain\\venv\\Scripts\\python.exe", "py", "python", "python3"]);
+});
+
+test("Python-Kandidaten am Mac: eigene Umgebung, Homebrew, python.org, pyenv vor dem nackten python3 - der kann "
+     + "der Xcode-Platzhalter sein; Linux: python3 zuerst", () => {
+  assert.deepEqual(pythonCandidates("", "darwin", "/Users/anna"), [
+    "/Users/anna/.2ndbrain/venv/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/Current/bin/python3", "/Users/anna/.pyenv/shims/python3",
+    "/opt/local/bin/python3", "python3", "/usr/bin/python3", "python"]);
+  assert.deepEqual(pythonCandidates("/opt/homebrew/bin/python3", "darwin", "/Users/anna").slice(0, 3),
+                   ["/opt/homebrew/bin/python3", "/Users/anna/.2ndbrain/venv/bin/python3", "/usr/local/bin/python3"]);
+  assert.deepEqual(pythonCandidates("", "linux", "/home/anna"), [
+    "/home/anna/.2ndbrain/venv/bin/python3", "python3", "/usr/local/bin/python3", "/home/anna/.pyenv/shims/python3",
+    "/home/anna/.local/bin/python3", "/usr/bin/python3", "python"]);
+});
+
+test("PATH für Engine und LikeC4: der eigene PATH bleibt, der Ordner des Pythons kommt davor, Homebrew & Co. dahinter", () => {
+  assert.equal(erweiterterPfad("/usr/bin:/bin:/usr/sbin:/sbin", "darwin", "/Users/anna", ["/opt/homebrew/bin"]),
+               "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:"
+               + "/Library/Frameworks/Python.framework/Versions/Current/bin:/Users/anna/.pyenv/shims:/opt/local/bin");
+  assert.equal(erweiterterPfad("C:\\Windows;C:\\Py", "win32", "C:\\Users\\anna"), "C:\\Windows;C:\\Py");
+  assert.equal(venvPython(venvDir("darwin", "/Users/anna/"), "darwin"), "/Users/anna/.2ndbrain/venv/bin/python3");
 });
 
 test("Python-Antwort: Version und Pfad; der Store-Platzhalter nennt keine Version", () => {

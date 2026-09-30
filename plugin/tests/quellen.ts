@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Frontmatter, VaultSource } from "../src/core/quelle";
 
 function inFolder(path: string, folder: string, recursive: boolean): boolean {
-  const prefix = `${folder}/`;
+  const prefix = folder ? `${folder}/` : "";
   return path.startsWith(prefix) && path.endsWith(".md") && (recursive || !path.slice(prefix.length).includes("/"));
 }
 
@@ -85,7 +85,7 @@ export class FsSource implements VaultSource {
         return;
       }
       for (const e of entries) {
-        const p = `${rel}/${e.name}`;
+        const p = rel ? `${rel}/${e.name}` : e.name;
         if (e.isDirectory()) {
           if (recursive) walk(p);
         } else if (e.name.endsWith(".md") && statSync(join(this.root, p)).isFile()) {

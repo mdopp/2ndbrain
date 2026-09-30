@@ -585,7 +585,11 @@ export function isAtlasQuestion(frage: string): boolean {
  *  Bildwunsch, auch wenn das Modell keinen sieht. */
 export function checkPicture(bild: string | null, frage: string, scope: Scope): string | null {
   const q = frage.toLowerCase();
-  if (!bild) return STARK.test(q) || /^\s*mal(?!\p{L})/u.test(q) ? pictureWish(frage, scope) : null;
+  const stark = STARK.test(q) || /^\s*mal(?!\p{L})/u.test(q);
+  if (!bild) return stark ? pictureWish(frage, scope) : null;
+  // ohne jedes Bild-Wort kein Bild, auch wenn das Modell eines waehlt: „Wie haengen A und B zusammen?“
+  // braucht eine Antwort in Worten (und die Werkzeuge) - das Kontext-Bild bekommt, wer darum bittet
+  if (!stark && !SCHWACH.test(q)) return null;
   const atlas = (scope.atlas ?? []).length > 0;
   const themen = (scope.themen ?? []).length > 0;
   if (bild !== "bild-kontexte" && atlas && !themen) return "bild-kontexte";

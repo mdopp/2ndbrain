@@ -7,7 +7,7 @@ export class ObsidianSource implements VaultSource {
   constructor(private readonly app: App) {}
 
   list(folder: string, recursive: boolean): string[] {
-    const prefix = `${folder.replace(/\/$/, "")}/`;
+    const prefix = folder ? `${folder.replace(/\/$/, "")}/` : "";
     return this.app.vault.getMarkdownFiles()
       .filter((f) => f.path.startsWith(prefix) && (recursive || !f.path.slice(prefix.length).includes("/")))
       .map((f) => f.path);
