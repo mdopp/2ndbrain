@@ -140,6 +140,44 @@ test("atlas: Nachrichten nach Typ mit Gegenseite und Owner, Prozesse, Teams, Dom
   assert.deepEqual(g.kante("obj-palette", "obj-sendung"), { von: "obj-palette", wie: "Gehoert-zu" });
 });
 
+test("Mehrdeutig: passt ein Name auf mehrere, nennen tasks, log, meetings und atlas alle – nie still den ersten", async () => {
+  const src = new MemorySource({
+    "entities/people/rita-rot.md": "---\ntype: person\nname: Rita Rot\n---\n",
+    "entities/people/rita-rauch.md": "---\ntype: person\nname: Rita Rauch\n---\n",
+    "entities/people/rita.md": "---\ntype: person\nname: Rita\nrole: Unbekannt\n---\n",       // Platzhalter aus einer Mitschrift
+    "entities/projects/hof-ost.md": "---\ntype: project\ntitle: Hofplanung Ost\n---\n# Hofplanung Ost\n\n## Offene Punkte\n"
+      + "- [ ] Rampe prüfen — [[rita-rot|Rita Rot]] · [[hof-ost|Hofplanung Ost]]\n\n## Event Log\n- [2026-09-20] [RISK] Rampe zu schmal\n",
+    "entities/projects/hof-west.md": "---\ntype: project\ntitle: Hofplanung West\n---\n# Hofplanung West\n\n## Offene Punkte\n"
+      + "- [ ] Tor prüfen — [[rita-rauch|Rita Rauch]] · [[hof-west|Hofplanung West]]\n",
+    "entities/forums/runde-hof.md": "---\ntype: forum\nname: Runde Hof\n---\n",
+    "entities/forums/runde-halle.md": "---\ntype: forum\nname: Runde Halle\n---\n",
+    "entities/contexts/_index.md": ["## Subdomänen", "", "| Subdomäne | Name | Kontexte | Art | Reife | Beschreibung |",
+      "|---|---|---|---|---|---|", "| `sd-hof` | Hof | 2 | core |  |  |", "", "## Kontexte", "",
+      "| Kontext | Subdomain | Owner | Reife | Beschreibung |", "|---|---|---|---|---|",
+      "| `ctx-tor-nord` Tor Nord | sd-hof |  |  |  |", "| `ctx-tor-sued` Tor Süd | sd-hof |  |  |  |", ""].join("\n"),
+  });
+  const g = await baueGraph(src);
+  const w = async (name: string, args: Record<string, unknown>) => (await fuehreAus(name, args, g, src, { today: HEUTE })).text;
+  const rita = await w("tasks", { person: "Rita" });
+  assert.ok(rita.startsWith("„Rita“ ist nicht eindeutig – gemeint ist eines davon:\n") && rita.includes("- [[rita-rot|Rita Rot]] · Person")
+            && rita.includes("- [[rita-rauch|Rita Rauch]] · Person") && rita.endsWith("frag zurück.") && !rita.includes("Rampe"), rita);
+  // eine Seite, die nur „Rita“ heisst, trifft genau - und ist doch nur eine von dreien
+  assert.ok(rita.includes("- [[rita|Rita]] · Person"), rita);
+  assert.ok((await w("read", { ziel: "Rita" })).startsWith("„Rita“ ist nicht eindeutig"));
+  assert.ok((await w("tasks", { person: "Rita Rot" })).includes("Rampe prüfen"), "der volle Name ist eindeutig");
+  const hof = await w("log", { thema: "Hofplanung" });
+  assert.ok(hof.includes("- [[hof-ost|Hofplanung Ost]] · Thema") && hof.includes("- [[hof-west|Hofplanung West]] · Thema")
+            && !hof.includes("Rampe zu schmal"), hof);
+  assert.ok((await w("meetings", { reihe: "Runde" })).startsWith("„Runde“ ist nicht eindeutig"));
+  const tor = await w("atlas", { art: "kontext", kontext: "Tor" });
+  assert.ok(tor.startsWith("„Tor“ ist nicht eindeutig") && tor.includes("- Tor Nord (`ctx-tor-nord`) · Kontext")
+            && tor.includes("- Tor Süd (`ctx-tor-sued`) · Kontext"), tor);
+  // nicht gefunden: weiter mit dem Rat zu suchen; beides zusammen: Liste und Rat
+  assert.ok((await w("tasks", { person: "Niemand" })).endsWith("Mit search den Namen finden."));
+  const beides = await w("tasks", { person: "Rita", thema: "Quatsch" });
+  assert.ok(beides.includes("[[rita-rauch|Rita Rauch]]") && beides.includes("Kein Thema „Quatsch“ gefunden.") && beides.endsWith("Mit search den Namen finden."), beides);
+});
+
 test("query: Frontmatter filtern – gleich (auch über Links und Namen), fehlt, sortieren", async () => {
   const ohneOwner = await werkzeug("query", { art: "System", bedingungen: [{ feld: "bereich", op: "=", wert: "Dach" },
                                                                          { feld: "owner", op: "fehlt" }] });

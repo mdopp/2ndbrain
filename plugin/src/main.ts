@@ -209,6 +209,17 @@ export default class SecondBrainPlugin extends Plugin {
     } else if (r.version !== soll) {
       this.engineStatus = { state: "abweichend", version: r.version,
         text: `Version ${r.version}, das Plugin ist ${soll} – „Aktualisieren“ holt die passende.` };
+      if (!this.engineWarned) {              // nach einem Update des Plugins: die Engine mit einem Klick nachziehen
+        this.engineWarned = true;
+        new Notice(createFragment((f) => {
+          f.appendText(`2ndBrain: Die Engine ist ${r.version}, das Plugin ${soll}. `);
+          const a = f.createEl("a", { text: "Engine aktualisieren", href: "#" });
+          a.onclick = (e) => {
+            e.preventDefault();
+            void this.installEngine();
+          };
+        }), 30_000);
+      }
     } else {
       this.engineStatus = { state: "ok", version: r.version, text: `Version ${r.version} in ${r.python}.` };
     }

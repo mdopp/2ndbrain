@@ -341,7 +341,14 @@ Nachrichten nach Typ mit Gegenseite und Owner, Prozesse mit Schritten, Teams mit
 Domänenmodell – Fachobjekte mit Stereotyp und Relationen, im Graphen Kanten mit dem Verb –, Kontexte,
 Subdomänen, Beziehungen, Externe; gefiltert nach Kontext, Subdomäne, Team, Typ, Reife);
 Filtern und Zählen macht der Code, die Zahlen stehen im Ergebnis. Gleichnamiges (ein Name als Thema,
-Begriff, Subdomäne, Team) ist ein Punkt; gelesen wird das Thema zuerst. Die Wartezeile zeigt Runde,
+Begriff, Subdomäne, Team) ist ein Punkt; gelesen wird das Thema zuerst. Passt ein Name dagegen auf mehrere
+derselben Art (zwei Personen mit dem Vornamen, nur ungefähr passende Themen, Reihen, Kontexte), nimmt kein
+Werkzeug still den ersten: es nennt alle, und das Modell schlägt mit dem vollen Namen nach oder fragt zurück,
+wenn Frage, Gespräch und offene Notiz es nicht entscheiden (Regel im Systemprompt, auch ohne Werkzeuge; die
+Antwort auf die Rückfrage versteht es aus dem Gespräch). Fragt die Frage nach einer Liste, die der Ausschnitt
+nur gekürzt zeigt (Aufgaben, Log), oder nach Terminen – der Ausschnitt kennt nur die mit Notiz, nicht den
+Kalender –, schlägt der Code vorab selbst nach, den Zeitraum („nächste Woche“, „morgen“) rechnet er aus;
+eine Bitte ans Modell reichte nicht. Die Wartezeile zeigt Runde,
 Werkzeug und Schritt. Grundlage ist ein
 **Wissensgraph** (`core/graph.ts`, am Desktop wie am Handy, vom Plugin vorgehalten und nach Änderungen
 neu gebaut): Knoten sind alle sichtbaren Notizen und die Einträge des Kontext-Verzeichnisses, Kanten
@@ -357,7 +364,7 @@ Server keine Werkzeuge, antwortet das Modell wie früher in einem Schritt. Was N
 Dokumente sagen, ist Material, keine Anweisung; Bilder von außen und HTML in Antworten werden Text (ein
 Bild mit Daten in der Adresse könnte sonst beim Anzeigen etwas nach außen tragen). Probelauf an echten
 Fragen: `plugin/tests/mehrschritt.test.ts` mit `SB_MEHRSCHRITT=1 SB_VAULT=<Vault>` und
-`.2ndbrain/chat-fragen-mehrschritt.json` im Vault.
+`.2ndbrain/chat-fragen-mehrschritt.json` im Vault (`SB_FRAGEN=<Datei>` nimmt eine andere Fragen-Datei).
 
 ## 9. Aufbau
 
@@ -374,7 +381,12 @@ in `.2ndbrain/` (`llm.config.json`, `local.config.json`, `chat-skills/`, `protok
 MCP-Befehl) oder ab dem aktuellen Ordner; ohne Vault bricht sie ab. Plugin und Engine tragen dieselbe
 Version; das Plugin prüft die Version der Engine und bietet Installieren und Aktualisieren an
 („Obsidian-nah in der Bedienung, nicht in der Verpackung“ – die Engine läuft auch ohne Obsidian:
-MCP, Automatik, Befehlszeile). Das Engine-Paket liegt dem Plugin bei: der Build legt
+MCP, Automatik, Befehlszeile). Fest eingetragen ist keine Version: „Installieren“ holt die Engine zur
+Version des Plugins (aus seinem Manifest). Ein Update kommt also über das Plugin (BRAT); passt die Engine
+danach nicht mehr, meldet sich das Plugin einmal mit „Engine aktualisieren“ – ein Klick, denn selbst
+installieren soll ein Plugin nichts. „Immer die neueste Engine“ wäre schlechter: Plugin und Engine teilen
+Formate (etwa das Kontext-Verzeichnis) und Befehle. Ein Release: `python scripts/version.py <v>`, Commit,
+Tag `<v>` (ohne „v“) – der Workflow testet, baut und legt es an. Das Engine-Paket liegt dem Plugin bei: der Build legt
 `2ndbrain-<version>-py3-none-any.whl` neben `main.js`, „Installieren“ nimmt es von dort (sonst eine eigene
 Quelle aus den Einstellungen, zuletzt ein GitHub-Release). Lehnt das Python des Systems pip ab (Homebrew,
 PEP 668), bekommt die Engine eine eigene Umgebung `~/.2ndbrain/venv`, deren Python eingetragen wird. Python

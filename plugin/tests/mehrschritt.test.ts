@@ -1,7 +1,8 @@
 // Fragen ueber mehrere Schritte: Wissensgraph (Notizen, Atlas, Systemuebersicht), die Werkzeuge search,
 // read, path, neighbors und die Schleife im Chat - mit einem Modell-Ersatz, ohne Server. Namen erfunden.
 // Mit SB_MEHRSCHRITT=1 und SB_VAULT=<Vault> stellt der letzte Test echte Fragen aus
-// <Vault>/.2ndbrain/chat-fragen-mehrschritt.json an den Modell-Server (liest nur, schreibt nichts).
+// <Vault>/.2ndbrain/chat-fragen-mehrschritt.json an den Modell-Server (liest nur, schreibt nichts);
+// SB_FRAGEN=<Datei> nimmt eine andere Fragen-Datei (etwa nur die neuen Fragen).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -243,6 +244,71 @@ test("Gekürzter Ausschnitt: fragt die Frage nach der Liste, schlägt der Code v
   assert.ok(!frei.aufrufe[0].messages.some((x) => x.role === "tool"));
 });
 
+test("Termine: fragt die Frage nach Terminen, holt der Code sie vorab – auch die nur im Kalender stehen", async () => {
+  const src = new MemorySource({
+    "entities/projects/portal.md": "---\ntype: project\ntitle: Portal\n---\n# Portal\n",
+    "archive/calendar/events.json": JSON.stringify([{ date_iso: "2026-10-06", time: "10:00", summary: "Portal Abstimmung" },
+                                                    { date_iso: "2026-10-20", time: "10:00", summary: "Portal Nachlese" }]),
+  });
+  const opts = { src, today: "2026-09-30", me: "", beschreibung: "", skills: [], llm: null, files: () => new Set<string>(),
+                 graph: () => baueGraph(src) };
+  const { fn, aufrufe } = modell([{ text: "Di 06.10. Portal Abstimmung.", aufrufe: [] }]);
+  const r = await ask({ frage: "Welche Termine habe ich nächste Woche zum Portal?" }, { ...opts, llmWerkzeuge: fn });
+  assert.deepEqual([r.antwort, r.schritte], ["Di 06.10. Portal Abstimmung.", ["sucht Termine 05.10.2026–11.10.2026 zu Portal"]]);
+  const m = aufrufe[0].messages;
+  assert.deepEqual(m[m.length - 2].tool_calls?.[0].function,
+                   { name: "meetings", arguments: JSON.stringify({ thema: "Portal", von: "2026-10-05", bis: "2026-10-11" }) });
+  assert.ok(m[m.length - 1].content.includes("Portal Abstimmung (Kalender, noch keine Notiz)") && !m[m.length - 1].content.includes("Nachlese"),
+            m[m.length - 1].content);
+  // der Inhalt eines Termins ist keine Terminliste: kein Vorab
+  const frei = modell([{ text: "Nichts.", aufrufe: [] }]);
+  await ask({ frage: "Was stand im letzten Termin zum Portal?" }, { ...opts, llmWerkzeuge: frei.fn });
+  assert.ok(!frei.aufrufe[0].messages.some((x) => x.role === "tool"));
+});
+
+test("Rückfrage: passt ein Name auf mehrere, nennt das Werkzeug alle – das Modell fragt zurück, die Antwort klärt es", async () => {
+  const src = new MemorySource({
+    "entities/people/rita-rot.md": "---\ntype: person\nname: Rita Rot\n---\n",
+    "entities/people/rita-rauch.md": "---\ntype: person\nname: Rita Rauch\n---\n",
+    "entities/people/max-muster.md": "---\ntype: person\nname: Max Muster\n---\n",
+    "entities/projects/portal.md": "---\ntype: project\ntitle: Portal\n---\n# Portal\n\n## Offene Punkte\n"
+      + "- [ ] Rampe prüfen — [[rita-rot|Rita Rot]] · [[portal|Portal]]\n- [ ] Tor prüfen — [[rita-rauch|Rita Rauch]] · [[portal|Portal]]\n",
+  });
+  const hinweis = "Mehrdeutig: „Rita“ tragen 2 Personen – [[rita-rauch|Rita Rauch]], [[rita-rot|Rita Rot]]. Wer gemeint ist, "
+    + "sagt die Frage nicht; klären es Gespräch oder offene Notiz nicht, frag zurück.";
+  const letzte = (m: ChatMessage[]) => m[m.length - 1].content;
+  const opts = { src, today: "2026-09-30", me: "", beschreibung: "", skills: [], llm: null,
+                 files: () => new Set(["rita-rot", "rita-rauch", "portal"]), graph: () => baueGraph(src) };
+  const rueckfrage = "Welche Rita meinst du – [[rita-rot|Rita Rot]] oder [[rita-rauch|Rita Rauch]]?";
+  const erst = modell([{ text: "", aufrufe: [ruf("a", "tasks", { person: "Rita" })] }, { text: rueckfrage, aufrufe: [] }]);
+  const r = await ask({ frage: "Was hat Rita offen?" }, { ...opts, llmWerkzeuge: erst.fn });
+  assert.deepEqual([r.ok, r.antwort, r.runden], [true, rueckfrage, 2]);
+  const system = erst.aufrufe[0].messages[0].content;
+  assert.ok(system.includes("rate nicht – frag in einem Satz zurück") && system.includes("Meldet ein Werkzeug „nicht eindeutig“"), system);
+  assert.ok(letzte(erst.aufrufe[0].messages).endsWith(`Frage: Was hat Rita offen?\n\n${hinweis}`), "der Code nennt alle Ritas");
+  const ergebnis = erst.aufrufe[1].messages.filter((m) => m.role === "tool")[0].content;
+  assert.ok(ergebnis.startsWith("„Rita“ ist nicht eindeutig") && ergebnis.includes("- [[rita-rauch|Rita Rauch]] · Person")
+            && !ergebnis.includes("Rampe"), ergebnis);
+  // die Antwort auf die Rueckfrage: das Gespraech geht mit, der volle Name ist eindeutig
+  const dann = modell([{ text: "", aufrufe: [ruf("b", "tasks", { person: "Rita Rauch" })] }, { text: "Tor prüfen.", aufrufe: [] }]);
+  const s = await ask({ frage: "Rita Rauch", verlauf: [{ rolle: "nutzer", text: "Was hat Rita offen?" }, { rolle: "assistent", text: rueckfrage }] },
+                      { ...opts, llmWerkzeuge: dann.fn });
+  assert.equal(s.antwort, "Tor prüfen.");
+  assert.deepEqual(dann.aufrufe[0].messages.slice(1, 3).map((m) => m.content), ["Was hat Rita offen?", rueckfrage]);
+  const tool = dann.aufrufe[1].messages.filter((m) => m.role === "tool")[0].content;
+  assert.ok(tool.includes("Tor prüfen") && !tool.includes("Rampe"), tool);
+  assert.ok(!letzte(dann.aufrufe[0].messages).includes("Mehrdeutig"), "der volle Name ist eindeutig");
+  // Bezug aus der vorigen Antwort: eine andere Person erbt die Frage nicht; eine Rita darin klärt es
+  const weiter = modell([{ text: "Welche Rita?", aufrufe: [] }]);
+  const t = await ask({ frage: "Was hat Rita offen?", bezug: { personen: ["max-muster"], herkunft: "aus der vorigen Antwort" } },
+                      { ...opts, llmWerkzeuge: weiter.fn });
+  assert.deepEqual([t.bezug?.personen, letzte(weiter.aufrufe[0].messages).endsWith(hinweis)], [[], true]);
+  const geklaert = modell([{ text: "Rampe prüfen.", aufrufe: [] }]);
+  const u = await ask({ frage: "Was hat Rita noch offen?", bezug: { personen: ["rita-rot"], herkunft: "aus der vorigen Antwort" } },
+                      { ...opts, llmWerkzeuge: geklaert.fn });
+  assert.deepEqual([u.bezug?.personen, letzte(geklaert.aufrufe[0].messages).includes("Mehrdeutig")], [["rita-rot"], false]);
+});
+
 test("Bildwunsch: ohne Bild-Wort kein Bild, auch wenn die Absicht eines wählt – die Frage geht in die Schleife", async () => {
   assert.equal(checkPicture("bild-kontexte", "Wie hängen Lagerhof und Portal zusammen?", { atlas: ["sd-lagerhof"] }), null);
   assert.equal(checkPicture("bild-kontexte", "Wie hängen Lagerhof und Portal zusammen? Als Bild", { atlas: ["sd-lagerhof"] }),
@@ -305,7 +371,7 @@ test("Modell: Werkzeug-Aufrufe lesen (Server und Text), zum Antworten zwingen, B
 
 // Echte Fragen an den Modell-Server (nur mit SB_MEHRSCHRITT=1 und SB_VAULT; liest, schreibt nichts)
 const VAULT = process.env.SB_VAULT ?? "";
-const FRAGEN = VAULT ? join(VAULT, ".2ndbrain", "chat-fragen-mehrschritt.json") : "";
+const FRAGEN = process.env.SB_FRAGEN || (VAULT ? join(VAULT, ".2ndbrain", "chat-fragen-mehrschritt.json") : "");
 test("Probelauf: Fragen über mehrere Schritte am echten Vault", { skip: !process.env.SB_MEHRSCHRITT || !FRAGEN || !existsSync(FRAGEN) },
   async () => {
     interface Fall { frage: string; notiz?: string; nachfrage_zu?: number }

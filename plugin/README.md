@@ -16,7 +16,7 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.11.1)
+## Was es kann (0.11.2)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|
@@ -26,7 +26,7 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Nacherfassen**: Notizen anhängen, *Fand nicht statt*, überspringen | ja | ja | nein |
 | **Nachbereiten**: am Desktop sofort (im Hintergrund, mit Ergebnis und *Rückgängig*); am Handy *Speichern und vormerken* – der Desktop bereitet beim nächsten Lauf der Automatik nach | vormerken | ja | ja |
 | **Fragen an den Vault** (Chat): Antworten nur aus dem Vault, mit Quellen; Skills als Knöpfe; **Bilder** (Themenbaum, Verlauf, Beteiligte, Reihen, Kontexte aus dem Domain Atlas mit den Systemen dahinter) zeichnet der Code als Mermaid – ein Klick auf einen Kasten öffnet seine Notiz | ja | ja | ja (Bilder nein) |
-| **Fragen über mehrere Schritte**: das Modell schlägt nach – `search`, `read`, `path` (Wege zwischen zwei Punkten über ihre Zwischenstationen), `neighbors` (Umkreis, etwa alle Personen mit Bezug zu einem Thema) über einen Graphen aus Notizen, Domain Atlas und Systemübersicht; dazu `tasks`, `log`, `meetings` (mit Kalender), `query` (Frontmatter) und `atlas` (Nachrichten nach Event/Command/Query, Prozesse, Teams, Domänenmodell) – gefiltert und gezählt vom Code; offene Notiz und Gespräch gehen mit, die Wartezeile zeigt Runde und Werkzeug | ja | ja | ja |
+| **Fragen über mehrere Schritte**: das Modell schlägt nach – `search`, `read`, `path` (Wege zwischen zwei Punkten über ihre Zwischenstationen), `neighbors` (Umkreis, etwa alle Personen mit Bezug zu einem Thema) über einen Graphen aus Notizen, Domain Atlas und Systemübersicht; dazu `tasks`, `log`, `meetings` (mit Kalender), `query` (Frontmatter) und `atlas` (Nachrichten nach Event/Command/Query, Prozesse, Teams, Domänenmodell) – gefiltert und gezählt vom Code; offene Notiz und Gespräch gehen mit, die Wartezeile zeigt Runde und Werkzeug; passt ein Name auf mehrere (etwa ein Vorname), nennt der Code alle und der Chat fragt zurück, statt zu raten | ja | ja | ja |
 | **Anleitung**: eingebaut (`anleitung.md`, steckt in main.js), eigene Ansicht | ja | ja | nein |
 | **Offene Fragen** (Kanon, Systemübersicht) im Chat – der einzige Chat-Teil, der die Engine braucht | – | ja | nein |
 | **Thema zuordnen**, **Mit wem?**, Liste *Ohne Thema* | – | ja | nein |
@@ -51,7 +51,8 @@ Befehle haben bewusst keine vorbelegten Tastenkürzel (*Einstellungen → Tasten
 1. Obsidian → *Einstellungen → Community-Plugins* → „2ndBrain“ einschalten (Desktop und Handy).
 2. Am Desktop *Einstellungen → 2ndBrain → Engine*: **Installieren** (passende Engine über `python -m pip`),
    dann **Einrichten** (fehlende Ordner, Vorlagen, Chat-Rezepte; Pfade; Befehl für Claude). Passt die Version
-   der Engine nicht mehr zum Plugin, sagt es das Plugin – **Aktualisieren**.
+   der Engine nicht mehr zum Plugin (nach einem Update des Plugins), meldet es sich einmal mit „Engine
+   aktualisieren“ – ein Klick, oder **Aktualisieren** in den Einstellungen.
 3. Automatik-Intervall (Standard 20 min, 0 = aus); **Vault-Konfiguration**
    (Ich, Beschreibung, Modell-Server, Modell, Kanon) – schreibt direkt in `.2ndbrain/*.json`, dieselben
    Dateien, die die Engine liest; **Kalender** im Schlüsselbund; **Systemübersicht**: Modell-Ordner (leer =

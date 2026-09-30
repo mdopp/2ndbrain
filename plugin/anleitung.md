@@ -183,6 +183,9 @@ aus deinem Vault, mit Links zu den Quellen.
   Kontexten und das Domänenmodell eines Kontexts (Fachobjekte mit Stereotyp und Relationen). Die Wartezeile zeigt Runde für Runde, welches Werkzeug er gerade
   aufruft; unter der Antwort steht, was er nachgeschlagen hat (anklickbar) und wie viele Runden es
   waren. Das dauert meist 5–20 Sekunden, Bilder weiterhin etwa eine.
+- **Rückfragen:** Passt ein Name auf mehrere – zwei Personen mit dem Vornamen, mehrere ähnliche Themen –
+  und klären weder Frage noch Gespräch noch offene Notiz, wer gemeint ist, fragt der Chat zurück und nennt
+  die Möglichkeiten. Als Antwort genügt der volle Name.
 - **Vorlagen ▾:** fertige Rezepte – Briefing für einen Termin, 1:1-Vorbereitung, Nachfassen, Stand
   eines Themas, Was hat sich bewegt, Risiken & Entscheidungen – und Bilder (Themenbaum, Verlauf,
   Beteiligte, Reihen), die ohne Modell in etwa einer Sekunde gezeichnet werden.
@@ -201,7 +204,7 @@ es beim nächsten Lauf. Unterwegs erreicht das Handy den Modell-Server zum Beisp
 | Einstellung | Wofür |
 |---|---|
 | Anleitung | öffnet diese Seite |
-| Python, Engine | Die Engine rechnet am Desktop. „Installieren / Aktualisieren“ nimmt das Engine-Paket, das dem Plugin beiliegt (Abhängigkeiten kommen aus dem Internet); lehnt das Python des Systems ab (am Mac mit Homebrew), bekommt die Engine eine eigene Umgebung in `~/.2ndbrain/venv`. Python sucht das Plugin auch in Homebrew, python.org und pyenv – sonst den Pfad eintragen, etwa `/opt/homebrew/bin/python3`. „Einrichten“ prüft den Vault und legt Fehlendes an – auch diese Anleitung. |
+| Python, Engine | Die Engine rechnet am Desktop. „Installieren / Aktualisieren“ nimmt das Engine-Paket, das dem Plugin beiliegt, sonst das aus dem Release zur Version des Plugins (Abhängigkeiten kommen aus dem Internet). Nach einem Update des Plugins meldet es sich einmal mit „Engine aktualisieren“. Lehnt das Python des Systems ab (am Mac mit Homebrew), bekommt die Engine eine eigene Umgebung in `~/.2ndbrain/venv`. Python sucht das Plugin auch in Homebrew, python.org und pyenv – sonst den Pfad eintragen, etwa `/opt/homebrew/bin/python3`. „Einrichten“ prüft den Vault und legt Fehlendes an – auch diese Anleitung. |
 | Automatik alle … Minuten | Lauf im Hintergrund; 0 = aus |
 | Ich | deine Personenseite – trennt „Meine Aufgaben“ von „Nachfassen“ |
 | Worum es in diesem Vault geht | ein Satz, der den Modellen den Rahmen gibt |

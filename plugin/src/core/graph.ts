@@ -26,6 +26,10 @@ export interface Knoten {
   datum?: string;
 }
 
+/** Was das Modell tun soll, wenn ein Verweis auf mehrere passt - fuer alle Werkzeuge gleich. */
+export const MEHRDEUTIG_RAT = "Mit dem vollen Namen noch einmal – entscheiden Frage, Gespräch und offene Notiz es nicht, "
+  + "frag zurück.";
+
 /** Eine Kante, gelesen von `von` aus: "Termin —Thema→ Thema", "Kontext —sendet→ Nachricht". */
 export interface Kante { von: string; wie: string }
 
@@ -192,6 +196,21 @@ export class Graph {
     return s === k.name ? `[[${ziel}]]` : `[[${ziel}|${k.name.split("|").join("/").split("]").join(")")}]]`;
   }
 
+  /** Personen, deren Name mit dem Vornamen `n` (normalisiert) beginnt - ausser `ohne`; die bekanntesten zuerst. */
+  private gleicherVorname(n: string, ohne: string): Knoten[] {
+    const ids = new Set<string>();
+    for (const [name, liste] of this.namen) {
+      if (name.startsWith(`${n} `)) for (const id of liste) if (id !== ohne && this.knoten.get(id)?.art === "Person") ids.add(id);
+    }
+    return [...ids].map((id) => this.knoten.get(id)!).sort((a, b) => this.grad(b.id) - this.grad(a.id) || a.name.localeCompare(b.name));
+  }
+
+  /** Ein Verweis passt auf mehrere: die Liste und der Rat - voller Name oder Rueckfrage, nie still der erste. */
+  mehrdeutig(ref: string, kandidaten: Knoten[]): string {
+    return `„${ref}“ ist nicht eindeutig – gemeint ist eines davon:\n`
+      + `${kandidaten.map((k) => `- ${this.nennung(k)} · ${k.art}`).join("\n")}\n${MEHRDEUTIG_RAT}`;
+  }
+
   /** Zwischenstation? Nie ich selbst, nie Berichte, Uebersichten, Verzeichnis, Vorlagen. */
   gesperrt(id: string): boolean {
     return id === this.ich || KEINE_HUBS.has(this.knoten.get(id)?.art ?? "");
@@ -232,7 +251,12 @@ export class Graph {
     if (exakt) {                                         // genau benannt; Gleichnamiges geht mit
       return { knoten: exakt, kandidaten: [], gleichnamig: [exakt, ...gleich.filter((k) => k.id !== exakt.id)] };
     }
-    if (gleich.length === 1) return eins(gleich[0]);
+    if (gleich.length === 1) {
+      // ein Vorname allein, den weitere Personen tragen („Rita“ neben „Rita Rot“): mehrdeutig, auch
+      // wenn eine Seite genau so heisst - meist ein Platzhalter aus einer Mitschrift
+      const mehr = gleich[0].art === "Person" && !n.includes(" ") ? this.gleicherVorname(n, gleich[0].id) : [];
+      return mehr.length ? { knoten: null, kandidaten: [gleich[0], ...mehr].slice(0, 8), gleichnamig: [] } : eins(gleich[0]);
+    }
     if (gleich.length > 1) {
       // verschiedene Arten: ein Punkt, gelesen wird der mit Vorrang; dieselbe Art mehrfach: mehrdeutig
       const erste = gleich.filter((k) => k.art === gleich[0].art);

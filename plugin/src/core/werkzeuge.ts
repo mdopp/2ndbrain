@@ -206,9 +206,7 @@ function suche(g: Graph, query: string, art: string | null, max = 10): WerkzeugE
 }
 
 function nichtEindeutig(g: Graph, ref: string, kandidaten: Knoten[]): string {
-  return kandidaten.length
-    ? `„${ref}“ ist nicht eindeutig – gemeint ist eines davon:\n${kandidaten.map((k) => `- ${g.nennung(k)} · ${k.art}`).join("\n")}`
-    : `„${ref}“ nicht gefunden – erst mit search suchen.`;
+  return kandidaten.length ? g.mehrdeutig(ref, kandidaten) : `„${ref}“ nicht gefunden – erst mit search suchen.`;
 }
 
 /** Gleichnamiges anderer Art („auch: Begriff …, Subdomäne …“) - damit das Modell es gezielt lesen kann. */

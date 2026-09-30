@@ -5,7 +5,7 @@
 import { Atlas, AtlasEintrag, norm } from "./atlas";
 import { addDays, validIso, weekday } from "./datum";
 import { Project, aliasMap, asList, loadProjects } from "./entities";
-import { Graph, Knoten, artFilter } from "./graph";
+import { Graph, Knoten, MEHRDEUTIG_RAT, artFilter } from "./graph";
 import { KIND_QUESTION, Task, isOpen, overdue, scanTasks } from "./aufgaben";
 import { loadCalendarEvents } from "./kalender";
 import type { WerkzeugSpec } from "./modell";
@@ -113,30 +113,54 @@ function mehr(n: number, gezeigt: number): string {
   return n > gezeigt ? `\n… und ${n - gezeigt} weitere` : "";
 }
 
+/** Was ein Filter nicht aufloesen konnte; `mehrdeutig`: der Text nennt schon die Moeglichkeiten. */
+interface Unaufgeloest { fehler: string; mehrdeutig: boolean }
+
+/** Der gemeinte Knoten einer Art: genau benannt oder der einzige dieser Art unter den Treffern. Passen
+ *  mehrere (zwei Personen mit dem Vornamen, nur ungefaehr passende Themen), keiner - mit der Liste, damit
+ *  das Modell den vollen Namen nimmt oder zurueckfragt; nie still der erste. */
+function einer(ctx: AbfrageKontext, ref: string, art: string,
+               passt: (k: Knoten) => boolean = () => true): Unaufgeloest & { k: Knoten | null } {
+  const a = ctx.g.aufloesen(ref);
+  if (a.knoten && a.knoten.art === art && passt(a.knoten)) return { k: a.knoten, fehler: "", mehrdeutig: false };
+  const alle = [...new Map([...a.gleichnamig, ...a.kandidaten].filter((x) => x.art === art && passt(x))
+    .map((x) => [x.id, x] as const)).values()];
+  if (alle.length === 1) return { k: alle[0], fehler: "", mehrdeutig: false };
+  return alle.length ? { k: null, fehler: ctx.g.mehrdeutig(ref, alle), mehrdeutig: true }
+    : { k: null, fehler: "", mehrdeutig: false };
+}
+
+/** Die Fehler der Filter als Text: Mehrdeutiges mit seiner Liste, nicht Gefundenes mit dem Rat zu suchen. */
+function fehlerText(...teile: Unaufgeloest[]): string {
+  const f = teile.filter((t) => t.fehler);
+  return f.map((t) => t.fehler).join("\n") + (f.some((t) => !t.mehrdeutig) ? " Mit search den Namen finden." : "");
+}
+
 /** Person aus einem Verweis: „ich“ = ich selbst, sonst ein Personen-Knoten des Graphen. */
-function person(ctx: AbfrageKontext, ref: string): { slug: string | null; fehler: string } {
+function person(ctx: AbfrageKontext, ref: string): Unaufgeloest & { slug: string | null } {
   const r = strip(ref);
-  if (!r) return { slug: null, fehler: "" };
+  if (!r) return { slug: null, fehler: "", mehrdeutig: false };
   if (/^(ich|mir|mich|mein|meine)$/i.test(r)) {
-    return ctx.me ? { slug: ctx.me, fehler: "" } : { slug: null, fehler: "Wer „ich“ ist, steht nicht in der Konfiguration." };
+    return ctx.me ? { slug: ctx.me, fehler: "", mehrdeutig: false }
+      : { slug: null, fehler: "Wer „ich“ ist, steht nicht in der Konfiguration.", mehrdeutig: false };
   }
-  const a = ctx.g.aufloesen(r);
-  const k = [a.knoten, ...a.gleichnamig, ...a.kandidaten].find((x) => x?.art === "Person");
-  return k?.pfad ? { slug: stem(k.pfad), fehler: "" } : { slug: null, fehler: `Keine Person „${r}“ gefunden.` };
+  const e = einer(ctx, r, "Person");
+  return e.k?.pfad ? { slug: stem(e.k.pfad), fehler: "", mehrdeutig: false }
+    : { slug: null, fehler: e.fehler || `Keine Person „${r}“ gefunden.`, mehrdeutig: e.mehrdeutig };
 }
 
 /** Thema (Slug) samt Unterthemen (Landkarte: `parent`). */
-function themen(ctx: AbfrageKontext, ref: string, projekte: Map<string, Project>): { slugs: string[]; name: string; fehler: string } {
+function themen(ctx: AbfrageKontext, ref: string, projekte: Map<string, Project>): Unaufgeloest & { slugs: string[]; name: string } {
   const r = strip(ref);
-  if (!r) return { slugs: [], name: "", fehler: "" };
-  const a = ctx.g.aufloesen(r);
-  const k = [a.knoten, ...a.gleichnamig, ...a.kandidaten].find((x) => x?.art === "Thema");
-  if (!k?.pfad) return { slugs: [], name: "", fehler: `Kein Thema „${r}“ gefunden.` };
+  if (!r) return { slugs: [], name: "", fehler: "", mehrdeutig: false };
+  const e = einer(ctx, r, "Thema");
+  const k = e.k;
+  if (!k?.pfad) return { slugs: [], name: "", fehler: e.fehler || `Kein Thema „${r}“ gefunden.`, mehrdeutig: e.mehrdeutig };
   const slugs = [stem(k.pfad)];
   for (let i = 0; i < slugs.length; i++) {
     for (const p of projekte.values()) if (p.parent === slugs[i] && !slugs.includes(p.slug)) slugs.push(p.slug);
   }
-  return { slugs, name: k.name, fehler: "" };
+  return { slugs, name: k.name, fehler: "", mehrdeutig: false };
 }
 
 function personName(ctx: AbfrageKontext, slug: string): string {
@@ -165,8 +189,7 @@ export async function aufgaben(ctx: AbfrageKontext, args: Record<string, unknown
   const status = str(args.status ?? "offen") || "offen";
   const beschreibung = [p.slug ? `von ${personName(ctx, p.slug)}` : "", th.name ? `zu ${th.name}` : ""].filter(Boolean).join(" ");
   const schritt = `sucht Aufgaben${beschreibung ? ` ${beschreibung}` : ""}`;
-  const fehler = [p.fehler, th.fehler].filter(Boolean);
-  if (fehler.length) return { text: `${fehler.join(" ")} Mit search den Namen finden.`, schritt };
+  if (p.fehler || th.fehler) return { text: fehlerText(p, th), schritt };
   const bis = tag(args.faellig_bis);
   const alt = ja(args.altbestand);
   const wort = strip(str(args.text ?? "")).toLowerCase();
@@ -209,7 +232,7 @@ export async function log(ctx: AbfrageKontext, args: Record<string, unknown>, ma
   const artArg = norm(str(args.art ?? ""));
   const kind = artArg ? LOG_ARTEN[artArg] ?? "" : "";
   const schritt = `sucht im Log${kind ? ` (${LOG_NAMEN[kind]})` : ""}${th.name ? ` zu ${th.name}` : ""}`;
-  if (th.fehler) return { text: `${th.fehler} Mit search den Namen finden.`, schritt };
+  if (th.fehler) return { text: fehlerText(th), schritt };
   const seit = ja(args.nur_aktiv) === true ? addDays(ctx.today, -30) : tag(args.seit);
   const bis = tag(args.bis);
   const wort = strip(str(args.text ?? "")).toLowerCase();
@@ -244,15 +267,16 @@ export async function termine(ctx: AbfrageKontext, args: Record<string, unknown>
   const th = themen(ctx, str(args.thema ?? ""), projekte);
   // „ich“ als Teilnehmer filtert nicht: meine Termine sind alle Termine (der Kalender kennt keine Teilnehmer)
   const p0 = person(ctx, str(args.person ?? ""));
-  const p = p0.slug && p0.slug === ctx.me ? { slug: null, fehler: "" } : p0;
+  const p = p0.slug && p0.slug === ctx.me ? { slug: null, fehler: "", mehrdeutig: false } : p0;
   const reiheRef = strip(str(args.reihe ?? ""));
-  const reihe = reiheRef ? ctx.g.aufloesen(reiheRef) : null;
-  const reiheK = reihe ? [reihe.knoten, ...reihe.gleichnamig, ...reihe.kandidaten].find((x) => x?.art === "Reihe") : undefined;
+  const reihe = reiheRef ? einer(ctx, reiheRef, "Reihe") : null;
+  const reiheK = reihe?.k ?? undefined;
+  const reiheFehler = { fehler: reiheRef && !reiheK ? reihe?.fehler || `Keine Reihe „${reiheRef}“ gefunden.` : "",
+                        mehrdeutig: !!reihe?.mehrdeutig };
   const status = norm(str(args.status ?? ""));
   const titel = strip(str(args.titel ?? "")).toLowerCase();
   const schritt = `sucht Termine ${de(von)}–${de(bis)}${th.name ? ` zu ${th.name}` : ""}${p.slug ? ` mit ${personName(ctx, p.slug)}` : ""}`;
-  const fehler = [th.fehler, p.fehler, reiheRef && !reiheK ? `Keine Reihe „${reiheRef}“ gefunden.` : ""].filter(Boolean);
-  if (fehler.length) return { text: `${fehler.join(" ")} Mit search den Namen finden.`, schritt };
+  if (th.fehler || p.fehler || reiheFehler.fehler) return { text: fehlerText(th, p, reiheFehler), schritt };
   const zeilen: TerminZeile[] = [];
   const mitNotiz = new Set<string>();
   for (const pfad of [...ctx.src.list(DIRS.meetings, true), ...ctx.src.list(DIRS.archive, true)]) {
@@ -404,15 +428,16 @@ function atlasId(ctx: AbfrageKontext, a: Atlas, ref: string, art: string): { id:
           .concat([...a.kontexte.values()].flatMap((k) => k.owner)))].map((id) => ({ id, name: a.weitere.get(id)?.name ?? id }))
         : [...a.weitere.values()].filter((e) => e.art === art);
   if (eintraege.some((e) => e.id === r)) return { id: r, fehler: "" };
-  const x = ctx.g.aufloesen(r);
-  const k = [x.knoten, ...x.gleichnamig, ...x.kandidaten].find((n) => n?.art === art && eintraege.some((e) => e.id === n.id));
-  if (k) return { id: k.id, fehler: "" };
+  const x = einer(ctx, r, art, (k) => eintraege.some((e) => e.id === k.id));
+  if (x.k) return { id: x.k.id, fehler: "" };
+  if (x.mehrdeutig) return { id: null, fehler: x.fehler };
   const n = norm(r);
   const treffer = eintraege.filter((e) => norm(e.name) === n || norm(e.id).includes(n) || norm(e.name).includes(n));
   const genau = treffer.filter((e) => norm(e.name) === n);
   if (genau.length === 1 || treffer.length === 1) return { id: (genau[0] ?? treffer[0]).id, fehler: "" };
   return { id: null, fehler: treffer.length
-    ? `„${r}“ ist mehrdeutig: ${treffer.slice(0, 6).map((e) => `${e.name} (\`${e.id}\`)`).join(", ")}.`
+    ? `„${r}“ ist nicht eindeutig – gemeint ist eines davon:\n`
+      + `${treffer.slice(0, 8).map((e) => `- ${e.name} (\`${e.id}\`) · ${art}`).join("\n")}\n${MEHRDEUTIG_RAT}`
     : `Kein Eintrag „${r}“ (${art}) im Atlas.` };
 }
 

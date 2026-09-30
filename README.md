@@ -54,9 +54,12 @@ Nur die Engine, ohne Plugin: `python -m pip install <Wheel aus dem Release>`, da
 
 ## Aktualisieren
 
-- **Plugin:** wie jedes Obsidian-Plugin – BRAT aktualisiert es selbst.
-- **Engine:** Passt ihre Version nicht zum Plugin, sagt es das Plugin; *Engine → Aktualisieren* holt die
-  passende. Von Hand: `python -m pip install --upgrade <Wheel der neuen Version>`.
+- **Plugin:** über BRAT – beim Start von Obsidian, wenn in BRAT das automatische Aktualisieren an ist, oder
+  mit seinem Befehl „Check for updates“. Ohne BRAT: `main.js`, `manifest.json` und `styles.css` des neuen
+  Releases nach `<Vault>/.obsidian/plugins/2ndbrain/` kopieren.
+- **Engine:** folgt dem Plugin – fest eingetragen ist keine Version. Passt sie nach einem Update nicht mehr,
+  meldet sich das Plugin einmal mit „Engine aktualisieren“; ein Klick holt die Engine zur Version des Plugins
+  (auch unter *Einstellungen → Engine → Aktualisieren*). Von Hand: `python -m pip install --upgrade <Wheel der neuen Version>`.
 - Deine Notizen, `.2ndbrain/` (Konfiguration, Chat-Rezepte) und Vorlagen, die du geändert hast, bleiben
   unberührt – „Einrichten“ ergänzt nur, was fehlt.
 
@@ -96,6 +99,14 @@ npm run build                       # Ziel: <Vault>/.obsidian/plugins/2ndbrain, 
 - `2ndbrain test` – Engine-Tests; jeder Test baut sich einen eigenen Vault und fasst keinen echten an.
 - `2ndbrain plugin-vergleich` – rechnen Plugin und Engine auf dem eigenen Vault dasselbe? (nur lesend)
 - `2ndbrain entdrahtung` – stehen Namen aus dem eigenen Vault im Code?
+
+Eine neue Version veröffentlichen – Plugin und Engine erscheinen immer zusammen:
+
+```bash
+python scripts/version.py 0.11.2       # manifest.json, versions.json, package.json, Engine
+git commit -am "2ndBrain 0.11.2: …" && git push
+git tag 0.11.2 && git push origin 0.11.2   # ohne „v“; der Workflow testet, baut und legt das Release an
+```
 
 ## Neue Version
 
