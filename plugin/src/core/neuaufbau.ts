@@ -16,6 +16,8 @@ export interface NeuaufbauStand {
   ok: boolean; kopie?: boolean; stufe?: string; ziel?: string; am?: string; hinweis?: string; grund?: string;
   ausweg?: string; nachbereitet?: number; gesamt?: number; zuletzt?: string; sekunden_je_termin?: number;
   eingearbeitet?: number; fehler?: string[]; vergleich?: NeuaufbauVergleich;
+  /** der Prozess, der in der Kopie baut (die Engine traegt ihn ein), ob er lebt, wie viele Kopien daneben liegen */
+  pid?: number | null; lebt?: boolean; kopien?: number;
   zurueckgesetzt?: { termine?: number; alte_termine?: number; seit?: string; termine_ohne_material?: number;
                      mails_zurueck?: number; mails_bleiben?: number };
 }
@@ -95,6 +97,10 @@ export function neuaufbauZeilen(s: NeuaufbauStand | null): { text: string; fehle
     out.push({ text: "Diese Kopie entstand ohne die alten Termin-Notizen aus dem Archiv. „Neu beginnen“ schließt sie ein.",
                fehler: true });
   }
+  if (s.lebt) out.push({ text: `Rechnet gerade (Prozess ${s.pid}).` });
+  else if (s.stufe === "baut") out.push({ text: "Rechnet gerade nicht – „Fortsetzen“ macht weiter.", fehler: true });
+  if ((s.kopien ?? 0) > 1) out.push({ text: `Daneben liegen ${(s.kopien ?? 0) - 1} ältere Kopie(n) – sie bleiben, bis du sie löschst.` });
+  if (s.zuletzt) out.push({ text: `Zuletzt gerechnet: ${s.zuletzt.split("/").pop()?.replace(/\.md$/, "") ?? s.zuletzt}` });
   if (typeof s.nachbereitet === "number" && typeof s.gesamt === "number" && s.gesamt > 0) {
     const rest = s.gesamt - s.nachbereitet;
     out.push({ text: `${s.nachbereitet} von ${s.gesamt} Terminen nachbereitet`

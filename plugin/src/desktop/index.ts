@@ -22,6 +22,10 @@ export interface DesktopServices {
   pid: number;
   /** Stand des juengsten Neuaufbaus neben dem Vault - von der Platte, ohne die Engine */
   neuaufbauStand(): NeuaufbauStand;
+  /** Laufende Neuaufbauten auf diesem Rechner beenden - gibt zurueck, was beendet wurde */
+  neuaufbauStoppen(): Promise<string[]>;
+  /** Den laufenden Auftrag der Engine beenden (Plugin wird entladen, Obsidian schliesst) */
+  stopAll(): void;
   /** Datei oder Ordner im Explorer/Finder oeffnen */
   oeffneImSystem(pfad: string): Promise<boolean>;
 }
@@ -29,8 +33,22 @@ export interface DesktopServices {
 export function createDesktop(basePath: string, python: () => Promise<string | null>,
                               env: () => Record<string, string>,
                               isLikec4: (url: string) => Promise<boolean>): DesktopServices {
+  const engine = new Engine(basePath, python, env);
   return {
-    engine: new Engine(basePath, python, env),
+    engine,
+    neuaufbauStoppen: async () => {
+      // erst den eigenen Auftrag (samt Unterprozessen), dann alles, was die Engine sonst noch findet -
+      // auch einen Lauf, den ein frueher geladenes Plugin gestartet hat
+      engine.stopAll();
+      const r = await engine.sofort(["neuaufbau", "stoppen", "--json"]);
+      try {
+        const j = JSON.parse(r.stdout.trim().split(/\r?\n/).pop() ?? "") as { beendet?: string[] };
+        return Array.isArray(j.beendet) ? j.beendet : [];
+      } catch {
+        return [];
+      }
+    },
+    stopAll: () => engine.stopAll(),
     likec4: new Likec4Server(process.platform, isLikec4),
     findPython: (configured) => findPython(configured, process.platform, execProbe, homedir()),
     venvDir: () => venvDir(process.platform, homedir()),

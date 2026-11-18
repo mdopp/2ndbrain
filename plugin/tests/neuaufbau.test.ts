@@ -8,7 +8,7 @@ import {
   ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, fortsetzbar, gueltigesSeit, neuaufbauAuswerten,
   neuaufbauMeldung, neuaufbauZeilen, ohneAlteTermine, startArgs, startKnopf,
 } from "../src/core/neuaufbau";
-import { neuaufbauKopien, neuaufbauStand } from "../src/desktop/neuaufbau";
+import { neuaufbauKopien, neuaufbauStand, prozessLebt } from "../src/desktop/neuaufbau";
 
 const ZAHLEN = { offen: 654, meine: 127, andere: 256, person_unklar: 181, ohne_person: 90, mit_frist: 28, fragen: 43, altbestand: 349 };
 
@@ -20,7 +20,13 @@ test("Stand: Stufe, Fortschritt mit Restzeit, Zahlen vorher/nachher", () => {
                                  nachbereitet: 5, gesamt: 23, sekunden_je_termin: 240 };
   const z = neuaufbauZeilen(baut).map((x) => x.text);
   assert.equal(z[0], "Letzter Neuaufbau vom 17.11.: rechnet – /vaults/mein-neuaufbau");
-  assert.equal(z[1], "5 von 23 Terminen nachbereitet, noch etwa 72 Minuten");
+  assert.ok(z.includes("5 von 23 Terminen nachbereitet, noch etwa 72 Minuten"));
+  assert.ok(z.includes("Rechnet gerade nicht – „Fortsetzen“ macht weiter."), "baut, aber kein Prozess: das sagen");
+  const lebt = neuaufbauZeilen({ ...baut, lebt: true, pid: 4711, kopien: 3, zuletzt: "active-meetings/2026-03-16 - runde.md" }).map((x) => x.text);
+  assert.ok(lebt.includes("Rechnet gerade (Prozess 4711)."));
+  assert.ok(lebt.includes("Daneben liegen 2 ältere Kopie(n) – sie bleiben, bis du sie löschst."));
+  assert.ok(lebt.includes("Zuletzt gerechnet: 2026-03-16 - runde"), "woran er gerade ist, steht da");
+  assert.equal(startKnopf(baut, true), "Läuft …");
 
   const fertig = neuaufbauZeilen({ ok: true, stufe: "verglichen", fehler: ["a: zu wenig Text"],
     vergleich: { ok: true, vorher: ZAHLEN, nachher: { ...ZAHLEN, offen: 410, meine: 61, person_unklar: 40 }, faellt_weg: 300, kommt_dazu: 56 } });
@@ -73,8 +79,26 @@ test("Stand von der Platte: die jüngste Kopie neben dem Vault, ohne die Engine 
   assert.equal(s.nachbereitet, 5);
   assert.equal(s.ziel, neu, "ohne Ziel in der Marke gilt der Ordner");
 
+  assert.equal(s.lebt, false);
+  assert.equal(s.kopien, 2);
+
+  // Rechnet in einer aelteren Kopie ein Prozess, zeigt das Fenster die - nicht die zuletzt angelegte
+  writeFileSync(join(alt, ".2ndbrain", "daten", "neuaufbau.json"),
+                JSON.stringify({ stufe: "baut", am: "2026-11-17T10:00:00", pid: process.pid }), "utf8");
+  writeFileSync(join(neu, ".2ndbrain", "daten", "neuaufbau.json"),
+                JSON.stringify({ stufe: "baut", am: "2026-11-18T10:00:00", pid: 0 }), "utf8");
+  const laeuft = neuaufbauStand(vault);
+  assert.equal(laeuft.ziel, alt, "die Kopie mit dem lebenden Prozess");
+  assert.equal(laeuft.lebt, true);
+  assert.equal(prozessLebt(process.pid), true);
+  assert.equal(prozessLebt(0), false);
+  assert.equal(prozessLebt(undefined), false);
+  writeFileSync(join(alt, ".2ndbrain", "daten", "neuaufbau.json"), JSON.stringify({ stufe: "verglichen", am: "2026-11-17T10:00:00" }), "utf8");
+  assert.equal(neuaufbauStand(vault).ziel, neu, "ohne lebenden Prozess: die zuletzt angelegte");
+
   writeFileSync(join(neu, ".2ndbrain", "daten", "neuaufbau.json"), "{kaputt", "utf8");
-  assert.equal(neuaufbauStand(vault).ok, false, "eine unlesbare Marke ist ein Fehler, kein leerer Stand");
+  writeFileSync(join(alt, ".2ndbrain", "daten", "neuaufbau.json"), "{kaputt", "utf8");
+  assert.equal(neuaufbauStand(vault).ok, false, "unlesbare Marken sind ein Fehler, kein leerer Stand");
 });
 
 test("Umfang und Neu beginnen: eine Kopie ohne die alten Termin-Notizen wird erkannt", () => {

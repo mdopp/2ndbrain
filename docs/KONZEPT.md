@@ -787,6 +787,15 @@ jedes Thema wächst wie damals. `--seit JJJJ-MM-TT` begrenzt, wie weit zurück; 
 lässt eine angefangene Kopie liegen und beginnt eine frische – nötig für eine Kopie, die eine ältere Version
 ohne die alten Notizen angelegt hat.
 
+**Nur einer rechnet.** Ein Neuaufbau überlebt das Plugin, das ihn gestartet hat; zwei nebeneinander teilen
+sich den Modell-Server, und man sieht nur einen (Befund 18.11.2026). Deshalb trägt die Marke der Kopie den
+Prozess, der gerade baut (`pid`, `rechner`). Ein Start wird abgelehnt, solange einer rechnet – auch einer aus
+einer älteren Version, der sich nur an seiner Befehlszeile zeigt (`fremde_prozesse`; die eigenen Vorfahren und
+Nachkommen zählen nicht). `2ndbrain neuaufbau stoppen` (im Fenster „Laufenden Neuaufbau beenden“) beendet alle
+Läufe auf dem Rechner samt Unterprozessen. Das Plugin hält den laufenden Auftrag der Engine an, wenn es
+entladen wird oder Obsidian schließt. Fortgesetzt wird nur eine Kopie mit dem heutigen Umfang, die zuletzt
+angelegte.
+
 Ursprungsdaten sind das Material der Termin-Notizen (Transkript, Mitschrift, eigene Notizen) und die Mails
 und Dokumente, die das Einarbeiten ins Archiv gelegt hat. Termin-Notizen ohne Material (alte Notizen) bleiben,
 wie sie sind – aus ihnen lässt sich nichts neu rechnen. Umgeschaltet wird von Hand (Ordner umbenennen, der alte

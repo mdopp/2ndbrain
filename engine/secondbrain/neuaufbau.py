@@ -326,6 +326,147 @@ def zuruecksetzen(seit: str = "") -> dict:
 
 # ------------------------------------------------------------------- bauen
 
+# ----------------------------------------------- laeuft schon einer?
+#
+# Ein Neuaufbau rechnet Stunden und ueberlebt das Plugin, das ihn gestartet hat (neu geladen, aktualisiert):
+# sein Prozess laeuft weiter. Ein zweiter daneben teilt sich mit ihm den Modell-Server, und man sieht nur
+# einen von beiden (Befund 18.11.2026). Deshalb traegt die Marke, welcher Prozess gerade baut - ein neuer
+# Start prueft das, und `stoppen` beendet ihn.
+
+def _rechner() -> str:
+    import socket
+    return socket.gethostname()
+
+
+def prozess_lebt(pid) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)              # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def kopien() -> list[tuple[Path, dict]]:
+    """Alle Neuaufbau-Kopien neben dem Vault mit lesbarer Marke: [(ordner, marke)], die juengste zuletzt
+    (nach dem Zeitpunkt des Anlegens)."""
+    out = []
+    for p in vp.VAULT.parent.glob(f"{vp.VAULT.name}-neuaufbau-*"):
+        try:
+            out.append((p, json.loads((p / ".2ndbrain" / "daten" / MARKE).read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            continue
+    return sorted(out, key=lambda x: str(x[1].get("am") or ""))
+
+
+def laufende() -> list[tuple[Path, dict]]:
+    """Kopien, in denen auf diesem Rechner gerade ein Neuaufbau rechnet."""
+    return [(p, z) for p, z in kopien()
+            if z.get("pid") and z.get("rechner", _rechner()) == _rechner() and prozess_lebt(z["pid"])]
+
+
+def fremde_prozesse() -> list[int]:
+    """Python-Prozesse auf diesem Rechner, die einen Neuaufbau rechnen und nicht dieser Aufruf sind -
+    auch solche aus einer Version, die noch keinen Prozess in die Marke schrieb. Gefunden ueber die
+    Befehlszeile ("neuaufbau" mit "alles" oder "bauen"); [] wenn sich die Prozesse nicht lesen lassen."""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                "Get-CimInstance Win32_Process | "
+                                "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+            zeilen = [z.split("\t", 2) for z in r.stdout.splitlines() if z.count("\t") >= 2]
+        else:
+            r = subprocess.run(["ps", "-eo", "pid=,ppid=,args="], capture_output=True, text=True, errors="replace", timeout=30)
+            zeilen = [z.strip().split(None, 2) for z in r.stdout.splitlines() if len(z.strip().split(None, 2)) == 3]
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return _fremde(zeilen, os.getpid())
+
+
+def _fremde(zeilen: list[list[str]], ich: int) -> list[int]:
+    """Aus [pid, eltern-pid, befehlszeile] die Neuaufbau-Prozesse, die nicht zu diesem Aufruf gehoeren:
+    weder er selbst noch seine Vorfahren (der Start laeuft ueber mehrere Python-Prozesse - Starter,
+    Befehlszeile, Schritt) noch seine Nachkommen."""
+    eltern = {int(p): int(pp) for p, pp, _ in zeilen if p.strip().isdigit() and pp.strip().isdigit()}
+    familie, cur = {ich}, ich
+    while cur in eltern and eltern[cur] not in familie and eltern[cur] > 0:      # die Vorfahren
+        cur = eltern[cur]
+        familie.add(cur)
+
+    def stammt_von_mir(pid: int) -> bool:                                         # die Nachkommen
+        gesehen: set[int] = set()
+        while pid in eltern and pid not in gesehen:
+            gesehen.add(pid)
+            pid = eltern[pid]
+            if pid == ich:
+                return True
+        return False
+
+    out = []
+    for p, _pp, befehl in zeilen:
+        b = befehl.casefold()
+        if not p.strip().isdigit() or "python" not in b or "neuaufbau" not in b or not re.search(r"\b(alles|bauen)\b", b):
+            continue
+        pid = int(p)
+        if pid not in familie and not stammt_von_mir(pid):
+            out.append(pid)
+    return out
+
+
+def _beenden(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            return subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True).returncode == 0
+        import signal
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except OSError:
+        return False
+
+
+def stoppen() -> dict:
+    """Laufende Neuaufbauten auf diesem Rechner beenden (samt Unterprozessen) - die aus den Marken und
+    die, die nur an ihrer Befehlszeile zu erkennen sind. Ihre Kopien bleiben und lassen sich fortsetzen."""
+    beendet = []
+    for pid in fremde_prozesse():
+        if _beenden(pid):
+            beendet.append(f"Prozess {pid}")
+    for p, z in laufende():
+        pid = int(z["pid"])
+        if not _beenden(pid) and prozess_lebt(pid):
+            continue
+        z.update(pid=None, stufe="unterbrochen", grund="von Hand beendet", ausweg="„Fortsetzen“ macht dort weiter.",
+                 geaendert=datetime.now().isoformat(timespec="seconds"))
+        try:
+            (p / ".2ndbrain" / "daten" / MARKE).write_text(json.dumps(z, ensure_ascii=False, indent=1),
+                                                           encoding="utf-8", newline="\n")
+        except OSError:
+            pass
+        beendet.append(str(p))
+    return {"ok": True, "beendet": beendet}
+
+
 def _vorgemerkt() -> list[Path]:
     """Die vorgemerkten Termine in der Reihenfolge, in der sie stattfanden - die aeltesten zuerst.
     So waechst jedes Thema wie damals: was im Juni beschlossen wurde, steht im Log, bevor der Termin
@@ -341,6 +482,16 @@ def bauen(max_termine: int | None = None) -> dict:
     dann den Eingang einarbeiten und Altbestand, Stand und Personen neu rechnen. Wiederholbar:
     ein zweiter Aufruf macht weiter, wo der erste aufgehoert hat."""
     z = _nur_in_der_kopie()
+    if z.get("pid") and z.get("pid") != os.getpid() and z.get("rechner", _rechner()) == _rechner() and prozess_lebt(z["pid"]):
+        return {"ok": False, "grund": f"In dieser Kopie rechnet schon ein Neuaufbau (Prozess {z['pid']})."}
+    _merken(pid=os.getpid(), rechner=_rechner())
+    try:
+        return _bauen(z, max_termine)
+    finally:
+        _merken(pid=None)
+
+
+def _bauen(z: dict, max_termine: int | None) -> dict:
     import auto
     import modell
 
@@ -557,7 +708,15 @@ def alles(ziel: Path | None = None, max_termine: int | None = None, seit: str = 
     ein Abbruch (Rechner aus, Modell weg) kostet so nur den Termin, der gerade lief. `neu`: nicht
     fortsetzen, sondern eine frische Kopie beginnen (die angefangene bleibt liegen)."""
     zurueck = ["zuruecksetzen", *(["--seit", seit] if seit else [])]
-    offen = stand() if (ziel is None and not neu) else {}
+    rechnet = laufende()
+    fremd = [] if rechnet else fremde_prozesse()
+    if rechnet or fremd:
+        wer = (f"Prozess {rechnet[-1][1].get('pid')}, Kopie {rechnet[-1][0].name}" if rechnet
+               else f"Prozess {', '.join(map(str, fremd))} – aus einer älteren Version, er rechnet im Hintergrund weiter")
+        return {"ok": False, "ziel": "", "grund": f"Es rechnet schon ein Neuaufbau ({wer}). Zwei nebeneinander "
+                "teilen sich den Modell-Server. Erst beenden: im Fenster „Laufenden Neuaufbau beenden“ oder "
+                "`2ndbrain neuaufbau stoppen`."}
+    offen = _fortsetzbare() if (ziel is None and not neu) else {}
     if offen.get("stufe") in FORTSETZBAR and offen.get("ziel") and Path(offen["ziel"]).is_dir():
         a = {"ok": True, "ziel": offen["ziel"], "fortgesetzt": True}
         z = offen.get("zurueckgesetzt") or {}
@@ -576,26 +735,38 @@ def alles(ziel: Path | None = None, max_termine: int | None = None, seit: str = 
             "gebaut": b, "vergleich": v}
 
 
+def _mit_allen_terminen(z: dict) -> bool:
+    """Wurde die Kopie mit dem heutigen Umfang zurueckgesetzt (auch die alten Termin-Notizen)? Eine
+    Kopie aus einer aelteren Version kennt den Zaehler nicht - sie fortzusetzen, rechnete nur die neuen."""
+    return z.get("stufe") == "angelegt" or "alte_termine" in (z.get("zurueckgesetzt") or {})
+
+
+def _fortsetzbare() -> dict:
+    """Die juengste angefangene Kopie mit dem heutigen Umfang - {} wenn es keine gibt."""
+    for p, z in reversed(kopien()):
+        if z.get("stufe") in FORTSETZBAR and _mit_allen_terminen(z):
+            return {**z, "ziel": z.get("ziel") or str(p)}
+    return {}
+
+
 def stand() -> dict:
-    """Im Vault: der juengste Neuaufbau daneben. In einer Kopie: ihr eigener Stand."""
+    """Im Vault: der Neuaufbau daneben - der, der gerade rechnet, sonst der juengste. In einer Kopie:
+    ihr eigener Stand. `lebt`: rechnet dort gerade ein Prozess?"""
     z = zustand()
     if z:
-        return {"ok": True, "kopie": True, **z}
-    kopien = sorted((p for p in vp.VAULT.parent.glob(f"{vp.VAULT.name}-neuaufbau-*")
-                     if (p / ".2ndbrain" / "daten" / MARKE).is_file()), key=lambda p: p.stat().st_mtime)
-    if not kopien:
+        return {"ok": True, "kopie": True, **z, "lebt": prozess_lebt(z.get("pid"))}
+    alle = kopien()
+    if not alle:
         return {"ok": True, "kopie": False, "stufe": "", "hinweis": "noch kein Neuaufbau – `2ndbrain neuaufbau`"}
-    try:
-        return {"ok": True, "kopie": False,
-                **json.loads((kopien[-1] / ".2ndbrain" / "daten" / MARKE).read_text(encoding="utf-8"))}
-    except (OSError, ValueError):
-        return {"ok": False, "grund": f"Marke in {kopien[-1]} nicht lesbar"}
+    p, z = (laufende() or alle)[-1]
+    return {"ok": True, "kopie": False, **z, "ziel": z.get("ziel") or str(p), "lebt": prozess_lebt(z.get("pid")),
+            "kopien": len(alle)}
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Alles neu aufbauen - in einer Kopie neben dem Vault")
     ap.add_argument("schritt", nargs="?", default="alles",
-                    choices=["alles", "anlegen", "zuruecksetzen", "bauen", "vergleichen", "stand"])
+                    choices=["alles", "anlegen", "zuruecksetzen", "bauen", "vergleichen", "stand", "stoppen"])
     ap.add_argument("--ziel", help="Ordner der Kopie (Vorgabe: <Vault>-neuaufbau-<Datum>)")
     ap.add_argument("--max", type=int, help="höchstens so viele Termine nachbereiten (Probe)")
     ap.add_argument("--neu", action="store_true",
@@ -612,7 +783,8 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--seit braucht ein Datum wie 2026-07-01")
         r = {"alles": lambda: alles(ziel, args.max, args.seit, args.neu), "anlegen": lambda: anlegen(ziel),
              "zuruecksetzen": lambda: zuruecksetzen(args.seit),
-             "bauen": lambda: bauen(args.max), "vergleichen": vergleichen, "stand": stand}[args.schritt]()
+             "bauen": lambda: bauen(args.max), "vergleichen": vergleichen, "stand": stand,
+             "stoppen": stoppen}[args.schritt]()
     except SystemExit as e:
         r = {"ok": False, "grund": str(e.code if e.code is not None else e).replace("[ABBRUCH] ", "")}
     except Exception as e:                           # noqa: BLE001 - der Grund gehoert in die Meldung

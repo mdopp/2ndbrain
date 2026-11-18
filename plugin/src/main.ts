@@ -182,7 +182,12 @@ export default class SecondBrainPlugin extends Plugin {
     });
     this.registerInterval(window.setInterval(() => void this.refreshLlm(), 5 * 60_000));
     // Obsidian schliesst: den Explorer mitnehmen (onunload kommt dann nicht immer)
-    if (this.desktop) this.registerDomEvent(window, "beforeunload", () => this.desktop?.likec4.stop());
+    if (this.desktop) {
+      this.registerDomEvent(window, "beforeunload", () => {
+        this.desktop?.likec4.stop();
+        this.desktop?.stopAll();              // sonst rechnet ein Neuaufbau ohne Obsidian weiter
+      });
+    }
     // Kaesten in Bildern oeffnen ihre Notiz (Pfad im Hinweistext)
     this.registerDomEvent(document, "click", (evt) => this.openDiagramNode(evt), { capture: true });
   }
@@ -191,6 +196,20 @@ export default class SecondBrainPlugin extends Plugin {
     this.beendet = true;
     if (this.autoTimer !== null) window.clearInterval(this.autoTimer);
     this.desktop?.likec4.stop();
+    // Was die Engine gerade rechnet, endet mit dem Plugin - ein Neuaufbau liefe sonst unsichtbar weiter,
+    // waehrend das neu geladene Plugin einen zweiten startet. Er laesst sich fortsetzen.
+    this.desktop?.stopAll();
+  }
+
+  /** Laufende Neuaufbauten auf diesem Rechner beenden - auch einen, den ein frueher geladenes Plugin gestartet hat. */
+  async neuaufbauStoppen(): Promise<void> {
+    if (!this.desktop) return;
+    const beendet = await this.desktop.neuaufbauStoppen();
+    this.neuaufbauLaeuft = false;
+    this.neuaufbauLetzteMeldung = beendet.length
+      ? `Neuaufbau unterbrochen: ${beendet.length} Lauf/Läufe beendet. „Fortsetzen“ macht in der Kopie weiter.`
+      : "Kein laufender Neuaufbau gefunden.";
+    new Notice(`2ndBrain: ${this.neuaufbauLetzteMeldung}`, 10_000);
   }
 
   private async startup(): Promise<void> {

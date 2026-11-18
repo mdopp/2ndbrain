@@ -71,9 +71,19 @@ export class NeuaufbauModal extends Modal {
 
   private knoepfe(bar: HTMLElement, s: NeuaufbauStand | null): void {
     bar.empty();
-    const laeuft = this.plugin.neuaufbauLaeuft;
+    // "läuft": von diesem Fenster gestartet - oder ein Prozess rechnet in der Kopie (auch ein frueher gestarteter)
+    const laeuft = this.plugin.neuaufbauLaeuft || !!s?.lebt;
     const start = bar.createEl("button", { text: startKnopf(s, laeuft), cls: "mod-cta" });
     start.disabled = laeuft || !this.plugin.isDesktop;
+    if (this.plugin.isDesktop) {
+      // immer da: auch ein Lauf aus einer aelteren Version, der sich nicht in der Marke zeigt, laesst sich so beenden
+      const halt = bar.createEl("button", { text: laeuft ? "Laufenden Neuaufbau beenden" : "Hängt noch einer? Beenden" });
+      halt.onclick = async () => {
+        halt.disabled = true;
+        await this.plugin.neuaufbauStoppen();
+        await this.zeigen();
+      };
+    }
     start.onclick = () => {
       void this.plugin.neuaufbauStarten(false, this.plugin.settings.neuaufbauSeit);
       void this.zeigen();

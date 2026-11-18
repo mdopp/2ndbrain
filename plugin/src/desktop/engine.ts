@@ -1,7 +1,7 @@
 // Bruecke zur Python-Engine (`python -m secondbrain`, installiert als Paket "2ndbrain"), nur am
 // Desktop. Alle Laeufe gehen durch EINE Warteschlange: parallele Schreiber auf dieselben Dateien
 // und parallele Modellanfragen (Server laeuft mit --parallel 1) werden so vermieden.
-import { spawn } from "child_process";
+import { ChildProcess, spawn } from "child_process";
 import { homedir } from "os";
 import { dirname } from "path";
 import type { EngineApi, EngineResult, RunOptions } from "../engineApi";
@@ -53,7 +53,31 @@ export class Engine implements EngineApi {
     }
   }
 
-  private spawnOnce(python: string, args: string[], timeoutMs: number, input?: string): Promise<EngineResult> {
+  /** Ausserhalb der Warteschlange - nur fuer das, was einen laufenden Auftrag beenden oder ansehen soll
+   *  (`neuaufbau stoppen`): in der Schlange stuende es hinter eben diesem Auftrag. */
+  async sofort(args: string[], timeoutMs = 60_000): Promise<EngineResult> {
+    const python = await this.findPython();
+    if (!python) return { code: -1, stdout: "", seconds: 0, stderr: "Kein Python ≥ 3.10 gefunden." };
+    return this.spawnOnce(python, ["-m", "secondbrain", ...args], timeoutMs, undefined, false);
+  }
+
+  /** Den laufenden Auftrag der Schlange beenden, samt seinen Unterprozessen - beim Entladen des Plugins und
+   *  beim Schliessen von Obsidian. Sonst rechnet ein Neuaufbau unsichtbar weiter, waehrend das neu geladene
+   *  Plugin einen zweiten startet (Befund 18.11.2026). */
+  stopAll(): void {
+    const pid = this.laufend?.pid;
+    if (!pid) return;
+    try {
+      if (process.platform === "win32") spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+      else this.laufend?.kill();
+    } catch {
+      // schon beendet
+    }
+  }
+
+  private laufend: ChildProcess | null = null;
+
+  private spawnOnce(python: string, args: string[], timeoutMs: number, input?: string, merken = true): Promise<EngineResult> {
     const started = Date.now();
     return new Promise((resolve) => {
       let out = "";
@@ -69,6 +93,7 @@ export class Engine implements EngineApi {
         // liegt nicht im Vault und findet ihn so.
         env: { ...process.env, ...pfad, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", VAULT_DIR: this.vault, ...this.extraEnv() },
       });
+      if (merken) this.laufend = child;
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (d: string) => { out += d; });
@@ -76,6 +101,7 @@ export class Engine implements EngineApi {
       const timer = setTimeout(() => child.kill(), timeoutMs);
       const done = (code: number, extra = "") => {
         clearTimeout(timer);
+        if (this.laufend === child) this.laufend = null;
         resolve({ code, stdout: out, stderr: err + extra, seconds: (Date.now() - started) / 1000 });
       };
       child.on("error", (e) => done(-1, `\n${String(e)}`));

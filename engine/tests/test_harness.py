@@ -758,6 +758,44 @@ def t_neuaufbau_schuetzt_den_vault():
            ["Alte Runde ohne Datum im Namen.md", "2026-03-16-mitte.md", "2026-09-01 - neu.md", "zzz ohne datum.md"],
            "die aeltesten zuerst, Undatiertes zuletzt:")
 
+    # Laeuft schon einer? Ein zweiter Start wird abgelehnt; fortgesetzt wird nur eine Kopie mit dem
+    # heutigen Umfang (mit den alten Termin-Notizen), die juengste zuerst.
+    ok(neuaufbau.prozess_lebt(os.getpid()) and not neuaufbau.prozess_lebt(0) and not neuaufbau.prozess_lebt(None)
+       and not neuaufbau.prozess_lebt("x"), "prozess_lebt")
+    alt_kopie = {"stufe": "baut", "am": "2026-11-18T08:00:00", "zurueckgesetzt": {"termine": 41}, "ziel": "/alt"}
+    neue_kopie = {"stufe": "unterbrochen", "am": "2026-11-18T09:00:00", "zurueckgesetzt": {"termine": 23, "alte_termine": 209},
+                  "ziel": "/neu"}
+    fertig = {"stufe": "verglichen", "am": "2026-11-18T10:00:00", "zurueckgesetzt": {"alte_termine": 1}, "ziel": "/fertig"}
+    with _AttrGuard(neuaufbau, kopien=lambda: [(Path("/alt"), alt_kopie), (Path("/neu"), neue_kopie), (Path("/fertig"), fertig)]):
+        eq(neuaufbau._fortsetzbare().get("ziel"), "/neu", "nicht die alte Kopie ohne alte Notizen, nicht die fertige:")
+    with _AttrGuard(neuaufbau, kopien=lambda: [(Path("/alt"), alt_kopie)]):
+        eq(neuaufbau._fortsetzbare(), {}, "eine Kopie aus einer aelteren Version wird nicht fortgesetzt:")
+    rechnet = {"stufe": "baut", "am": "2026-11-18T09:00:00", "pid": os.getpid(), "rechner": neuaufbau._rechner()}
+    with _AttrGuard(neuaufbau, kopien=lambda: [(Path("/k"), rechnet), (Path("/tot"), {**rechnet, "pid": 0}),
+                                               (Path("/woanders"), {**rechnet, "rechner": "anderer-rechner"})]):
+        eq([p.name for p, _ in neuaufbau.laufende()], ["k"], "nur lebende Prozesse auf diesem Rechner:")
+        r = neuaufbau.alles()
+        ok(r["ok"] is False and "rechnet schon ein Neuaufbau" in r["grund"] and "beenden" in r["grund"],
+           f"ein zweiter Start wird abgelehnt, mit Ausweg: {r}")
+    with _AttrGuard(neuaufbau, kopien=lambda: [], fremde_prozesse=lambda: [4711]):
+        r = neuaufbau.alles()
+        ok(r["ok"] is False and "4711" in r["grund"] and "älteren Version" in r["grund"],
+           f"auch ein Lauf, der sich nur an der Befehlszeile zeigt: {r}")
+
+    # Der eigene Start laeuft ueber mehrere Python-Prozesse (Starter -> Befehlszeile -> Schritt): weder
+    # Vorfahren noch Nachkommen sind ein fremder Lauf - sonst blockierte sich der Neuaufbau selbst.
+    prozesse = [["100", "1", "obsidian.exe"],
+                ["200", "100", "python.exe -m secondbrain neuaufbau alles --json"],        # Starter
+                ["300", "200", "C:\\py\\python.exe -m secondbrain neuaufbau alles --json"],  # ich
+                ["400", "300", "python neuaufbau.py bauen --json"],                         # mein Schritt
+                ["500", "100", "python.exe -m secondbrain neuaufbau alles --json"],        # ein anderer Lauf
+                ["600", "500", "python neuaufbau.py bauen --json"],                         # dessen Schritt
+                ["700", "100", "python -m secondbrain neuaufbau stand --json"],            # fragt nur
+                ["800", "100", "node neuaufbau alles"]]                                     # kein Python
+    eq(neuaufbau._fremde(prozesse, 300), [500, 600], "nur der andere Lauf und sein Schritt:")
+    eq(neuaufbau._fremde(prozesse, 700), [200, 300, 400, 500, 600], "wer nur fragt, sieht alle laufenden:")
+    eq(neuaufbau._fremde([["1", "1", "python neuaufbau bauen"]], 1), [], "ein Kreis in den Eltern haengt nichts auf:")
+
     kopie = Path(tempfile.mkdtemp(prefix="neuaufbau-")) / "kopie"
     r = neuaufbau.anlegen(kopie)
     ok(r["ok"] and (kopie / ".2ndbrain" / "daten" / neuaufbau.MARKE).is_file(), f"Kopie mit Marke: {r}")
