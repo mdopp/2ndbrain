@@ -780,6 +780,13 @@ welchen Stand der Nutzer gesehen hat (`ableitungGesehen`), und meldet sich nach 
 ein frisch eingerichteter Vault ohne alten Bestand nicht. Wer eine Version baut, die Aufgaben, Entscheidungen
 oder den Stand anders ableitet, erhöht die Zahl.
 
+**Alle Termine, die ältesten zuerst.** Auch die alten Termin-Notizen im Archiv (eingearbeitet, ohne getrenntes
+Material) werden neu gerechnet: Ihr Text wird als `## Mitschrift` verpackt (eigene Überschriften rücken
+darunter), und sie laufen durch dieselbe Nachbereitung. Gerechnet wird in der Reihenfolge des Datums, damit
+jedes Thema wächst wie damals. `--seit JJJJ-MM-TT` begrenzt, wie weit zurück; `--neu` (im Plugin „Neu beginnen“)
+lässt eine angefangene Kopie liegen und beginnt eine frische – nötig für eine Kopie, die eine ältere Version
+ohne die alten Notizen angelegt hat.
+
 Ursprungsdaten sind das Material der Termin-Notizen (Transkript, Mitschrift, eigene Notizen) und die Mails
 und Dokumente, die das Einarbeiten ins Archiv gelegt hat. Termin-Notizen ohne Material (alte Notizen) bleiben,
 wie sie sind – aus ihnen lässt sich nichts neu rechnen. Umgeschaltet wird von Hand (Ordner umbenennen, der alte

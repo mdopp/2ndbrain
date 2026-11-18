@@ -21,8 +21,10 @@ daraus abgeleitet wurde, wird verworfen und neu gerechnet:
   - Termin mit Material: die Nachbereitung wird zurueckgenommen (`nachbereiten.undo`, sonst werden
     Entscheidungen, Actions, Parkplatz und Kernteil geleert), seine Log-Zeilen und die aus ihm
     uebernommenen Punkte verschwinden aus den Themen, die Notiz kommt aus dem Archiv zurueck.
-  - Termin ohne Material (alte Notizen): bleibt, wie er ist - es gibt nichts, woraus sich neu
-    rechnen liesse.
+  - Alte Termin-Notiz (im Archiv, eingearbeitet, ohne getrenntes Material): ihr Text ist das
+    Material. Er wird als `## Mitschrift` verpackt, die Notiz kommt zurueck und laeuft durch dieselbe
+    Nachbereitung wie die neuen - mit Art, Beleg und Zusammenfuehren. `--seit` begrenzt, wie weit zurueck.
+  - Vorbereitete Termine ohne Nachbereitung, zu kurze oder undatierte Notizen: bleiben, wie sie sind.
   - Mail oder Dokument: das Einarbeiten wird zurueckgenommen (`einarbeiten.undo`), wo das sauber
     geht; sonst bleibt es, wie es ist.
 
@@ -104,7 +106,11 @@ def anlegen(ziel: Path | None = None) -> dict:
     if zustand():
         return {"ok": False, "grund": "Das hier ist schon eine Neuaufbau-Kopie – im Vault selbst starten."}
     quelle = vp.VAULT.resolve()
-    ziel = (ziel or quelle.parent / f"{quelle.name}-neuaufbau-{date.today().isoformat()}").resolve()
+    if ziel is None:
+        # der erste freie Name des Tages: <Vault>-neuaufbau-<Datum>, dann -2, -3 ... (ein frueherer bleibt liegen)
+        basis = quelle.parent / f"{quelle.name}-neuaufbau-{date.today().isoformat()}"
+        ziel = next(p for p in (basis, *(basis.with_name(f"{basis.name}-{i}") for i in range(2, 100))) if not p.exists())
+    ziel = ziel.resolve()
     if ziel.exists():
         return {"ok": False, "grund": f"{ziel} gibt es schon – anderen Ordner nennen (--ziel) oder den alten wegräumen."}
     if ziel.is_relative_to(quelle) or quelle.is_relative_to(ziel):
@@ -169,8 +175,65 @@ def _zeilen_mit_quelle_entfernen(text: str, stems: set[str]) -> tuple[str, int]:
     return "\n".join(out), n
 
 
-def zuruecksetzen() -> dict:
-    """In der Kopie: den Stand vorher festhalten, dann Abgeleitetes verwerfen."""
+MATERIAL_ABSCHNITT = "## Mitschrift"
+KEINE_TERMINE = ("landkarte-report", "migration-report", "calendar-export", "archiv", "report")
+_FM_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.S)
+_UEBERSCHRIFT_RE = re.compile(r"^(#{1,6})(\s+\S.*)$")
+
+
+def _ist_alte_notiz(p: Path, fm: dict) -> bool:
+    """Eine archivierte Termin-Notiz aus der Zeit vor der Nachbereitung mit Material: im Archiv,
+    eingearbeitet (`processed: true`), mit Datum - und kein Bericht, keine Mail, kein Dokument."""
+    try:
+        im_archiv = p.resolve().is_relative_to(vp.MEETINGS_DIR.resolve())
+    except OSError:
+        im_archiv = False
+    typ = str(fm.get("type") or "meeting")
+    datum = str(fm.get("date") or "")[:10]
+    return (im_archiv and str(fm.get("processed")).lower() == "true" and typ not in KEINE_TERMINE
+            and typ not in EINGANG_TYPEN and bool(re.match(r"^\d{4}-\d{2}-\d{2}$", datum)))
+
+
+def als_material(body: str) -> str:
+    """Den Text einer alten Notiz als einen Abschnitt `## Mitschrift` verpacken. Ihre eigenen
+    Ueberschriften ruecken darunter (mindestens Ebene 3) - sonst endete die Mitschrift an der ersten
+    "## Entscheidungen" der alten Notiz, und der Rest zaehlte nicht als Material."""
+    zeilen, im_code = [], False
+    for line in body.strip("\n").split("\n"):
+        if line.lstrip().startswith("```"):
+            im_code = not im_code
+        m = None if im_code else _UEBERSCHRIFT_RE.match(line)
+        zeilen.append(("#" * min(6, max(3, len(m.group(1)) + 1)) + m.group(2)) if m else line)
+    return "\n".join([MATERIAL_ABSCHNITT, "", *zeilen, "", "## Entscheidungen", "", "## Actions", "", "## Parkplatz", ""])
+
+
+def _alte_notiz_oeffnen(p: Path, fm: dict, text: str, seit: str = "") -> Path | None:
+    """Eine alte Notiz fuer die Nachbereitung vorbereiten: Text als Mitschrift, zurueck nach
+    active-meetings/, vorgemerkt. None, wenn sie zu wenig Text hat, vor `seit` liegt oder dort schon
+    eine Notiz gleichen Namens liegt - dann bleibt sie, wie sie ist."""
+    import auto
+    import nachbereiten
+    if seit and str(fm.get("date") or "")[:10] < seit:
+        return None
+    m = _FM_RE.match(text)
+    body = text[m.end():] if m else text
+    if len(" ".join(body.split())) < nachbereiten.MIN_PROSE_CHARS:
+        return None
+    ziel = nachbereiten.ACTIVE_DIR / p.name
+    if ziel.exists():
+        return None
+    p.write_text((m.group(0) if m else "") + "\n" + als_material(body), encoding="utf-8", newline="\n")
+    nachbereiten.verschiebe(p, ziel)
+    vp.update_frontmatter(ziel, {"type": "meeting", "status": "vorbereitet", "processed": False,
+                                 auto.WRAPUP_FLAG: auto.WRAPUP_REQUESTED, "neuaufbau": "alte Notiz als Mitschrift"},
+                          remove=("processed_at", "entities_created", "entities_updated", "notes", "archiviert",
+                                  "eingearbeitet", "bundled_into", "deferred"))
+    return ziel
+
+
+def zuruecksetzen(seit: str = "") -> dict:
+    """In der Kopie: den Stand vorher festhalten, dann Abgeleitetes verwerfen. `seit` (JJJJ-MM-TT):
+    alte Termin-Notizen erst ab diesem Datum neu rechnen - die neuen kommen immer alle."""
     _nur_in_der_kopie()
     import einarbeiten
     import nachbereiten
@@ -204,7 +267,7 @@ def zuruecksetzen() -> dict:
         mails["zurueck"].append(p.stem)
 
     # 2. Termine mit Material: Nachbereitung zuruecknehmen, wieder oeffnen, vormerken
-    termine = {"zurueck": [], "ohne_material": 0, "nie_nachbereitet": 0}
+    termine = {"zurueck": [], "alte": [], "ohne_material": 0, "nie_nachbereitet": 0}
     import auto
     for p in _termine():
         text = p.read_text(encoding="utf-8")
@@ -212,7 +275,14 @@ def zuruecksetzen() -> dict:
         if str(fm.get("type") or "") in EINGANG_TYPEN:
             continue                                   # keine Termin-Notiz (eine Mail, die hier liegt)
         if not _war_nachbereitet(fm):
-            termine["nie_nachbereitet"] += 1
+            # Eine alte Termin-Notiz (vor der Nachbereitung mit Material eingearbeitet): ihr Text ist
+            # das Material - als Mitschrift verpackt laeuft sie durch dieselbe Nachbereitung wie die neuen
+            neu = _alte_notiz_oeffnen(p, fm, text, seit) if _ist_alte_notiz(p, fm) else None
+            if neu is None:
+                termine["nie_nachbereitet"] += 1
+            else:
+                stems.add(p.stem)
+                termine["alte"].append(p.stem)
             continue
         if len(nachbereiten.find_material(text)) < nachbereiten.MIN_PROSE_CHARS:
             termine["ohne_material"] += 1
@@ -245,10 +315,11 @@ def zuruecksetzen() -> dict:
                 f.write_text(neu, encoding="utf-8", newline="\n")
                 themen += n
 
-    ergebnis = {"ok": True, "termine": len(termine["zurueck"]), "termine_ohne_material": termine["ohne_material"],
+    ergebnis = {"ok": True, "termine": len(termine["zurueck"]), "alte_termine": len(termine["alte"]), "seit": seit,
+                "termine_ohne_material": termine["ohne_material"],
                 "termine_nie_nachbereitet": termine["nie_nachbereitet"], "mails_zurueck": len(mails["zurueck"]),
                 "mails_bleiben": len(mails["bleibt"]), "themen_zeilen_entfernt": themen}
-    _merken(stufe="zurueckgesetzt", zurueckgesetzt=ergebnis, termine=sorted(termine["zurueck"]),
+    _merken(stufe="zurueckgesetzt", zurueckgesetzt=ergebnis, termine=sorted([*termine["zurueck"], *termine["alte"]]),
             mails=sorted(mails["zurueck"]), mails_bleiben=mails["bleibt"][:200])
     return ergebnis
 
@@ -256,8 +327,12 @@ def zuruecksetzen() -> dict:
 # ------------------------------------------------------------------- bauen
 
 def _vorgemerkt() -> list[Path]:
+    """Die vorgemerkten Termine in der Reihenfolge, in der sie stattfanden - die aeltesten zuerst.
+    So waechst jedes Thema wie damals: was im Juni beschlossen wurde, steht im Log, bevor der Termin
+    vom September dazukommt, und ein spaeterer Termin findet seine Vorgaenger schon nachbereitet."""
     import auto
-    return auto.requested_notes()
+    return sorted(auto.requested_notes(),
+                  key=lambda p: (str(vp.read_frontmatter_head(p).get("date") or "9999")[:10], p.name))
 
 
 def bauen(max_termine: int | None = None) -> dict:
@@ -425,9 +500,12 @@ def vergleichen() -> dict:
              "ohne_person": "ohne Person", "mit_frist": "mit Frist", "fragen": "Fragen", "altbestand": "Altbestand, ungeprüft"}
     out = ["# Neuaufbau – Vergleich", "",
            f"Kopie von `{z.get('quelle')}`, angelegt {str(z.get('am'))[:16].replace('T', ' ')}. Der Vault selbst ist unverändert.", "",
-           f"Neu gerechnet: {zr.get('termine', 0)} Termine mit Material, {zr.get('mails_zurueck', 0)} Mails und Dokumente. "
-           f"Unverändert geblieben: {zr.get('termine_ohne_material', 0)} Termine ohne Material (alte Notizen), "
-           f"{zr.get('mails_bleiben', 0)} Mails und Dokumente, deren Einarbeiten sich nicht sauber zurücknehmen ließ.", "",
+           f"Neu gerechnet: {zr.get('termine', 0)} Termine mit Material, {zr.get('alte_termine', 0)} alte Termin-Notizen "
+           f"(ihr Text als Mitschrift), {zr.get('mails_zurueck', 0)} Mails und Dokumente. "
+           f"Unverändert geblieben: {zr.get('termine_ohne_material', 0)} nachbereitete Termine ohne Material, "
+           f"{zr.get('termine_nie_nachbereitet', 0)} Notizen ohne Nachbereitung (vorbereitete Termine, zu kurze oder "
+           f"undatierte alte Notizen), {zr.get('mails_bleiben', 0)} Mails und Dokumente, deren Einarbeiten sich nicht "
+           "sauber zurücknehmen ließ.", "",
            "| | vorher | nachher |", "|---|---|---|"]
     out += [f"| {titel[k]} | {za[k]} | {zn[k]} |" for k in titel]
     eu = z.get("erledigt_uebernommen") or {}
@@ -474,20 +552,22 @@ def _in_der_kopie(ziel: str, *args: str) -> dict:
 FORTSETZBAR = ("angelegt", "zurueckgesetzt", "baut", "unterbrochen")
 
 
-def alles(ziel: Path | None = None, max_termine: int | None = None) -> dict:
+def alles(ziel: Path | None = None, max_termine: int | None = None, seit: str = "", neu: bool = False) -> dict:
     """Der ganze Neuaufbau. Steht daneben schon eine angefangene Kopie, macht er dort weiter -
-    ein Abbruch (Rechner aus, Modell weg) kostet so nur den Termin, der gerade lief."""
-    offen = stand() if ziel is None else {}
+    ein Abbruch (Rechner aus, Modell weg) kostet so nur den Termin, der gerade lief. `neu`: nicht
+    fortsetzen, sondern eine frische Kopie beginnen (die angefangene bleibt liegen)."""
+    zurueck = ["zuruecksetzen", *(["--seit", seit] if seit else [])]
+    offen = stand() if (ziel is None and not neu) else {}
     if offen.get("stufe") in FORTSETZBAR and offen.get("ziel") and Path(offen["ziel"]).is_dir():
         a = {"ok": True, "ziel": offen["ziel"], "fortgesetzt": True}
         z = offen.get("zurueckgesetzt") or {}
         if offen["stufe"] == "angelegt":
-            z = _in_der_kopie(a["ziel"], "zuruecksetzen")
+            z = _in_der_kopie(a["ziel"], *zurueck)
     else:
         a = anlegen(ziel)
         if not a.get("ok"):
             return a
-        z = _in_der_kopie(a["ziel"], "zuruecksetzen")
+        z = _in_der_kopie(a["ziel"], *zurueck)
     if not z.get("ok", True):
         return {**z, "ziel": a["ziel"]}
     b = _in_der_kopie(a["ziel"], "bauen", *(["--max", str(max_termine)] if max_termine is not None else []))
@@ -518,13 +598,20 @@ def main(argv: list[str] | None = None) -> int:
                     choices=["alles", "anlegen", "zuruecksetzen", "bauen", "vergleichen", "stand"])
     ap.add_argument("--ziel", help="Ordner der Kopie (Vorgabe: <Vault>-neuaufbau-<Datum>)")
     ap.add_argument("--max", type=int, help="höchstens so viele Termine nachbereiten (Probe)")
+    ap.add_argument("--neu", action="store_true",
+                    help="nicht fortsetzen: eine frische Kopie beginnen (die angefangene bleibt liegen)")
+    ap.add_argument("--seit", default="", metavar="JJJJ-MM-TT",
+                    help="alte Termin-Notizen erst ab diesem Datum neu rechnen (Vorgabe: alle)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     ziel = Path(args.ziel) if args.ziel else None
     # Immer ein Ergebnis: scheitert ein Schritt (kein Schreibrecht neben dem Vault, gesperrte Datei, volle
     # Platte), steht der Grund im JSON - sonst bekaeme das Plugin nur "kein Ergebnis" zu sehen.
     try:
-        r = {"alles": lambda: alles(ziel, args.max), "anlegen": lambda: anlegen(ziel), "zuruecksetzen": zuruecksetzen,
+        if args.seit and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.seit):
+            raise SystemExit("--seit braucht ein Datum wie 2026-07-01")
+        r = {"alles": lambda: alles(ziel, args.max, args.seit, args.neu), "anlegen": lambda: anlegen(ziel),
+             "zuruecksetzen": lambda: zuruecksetzen(args.seit),
              "bauen": lambda: bauen(args.max), "vergleichen": vergleichen, "stand": stand}[args.schritt]()
     except SystemExit as e:
         r = {"ok": False, "grund": str(e.code if e.code is not None else e).replace("[ABBRUCH] ", "")}

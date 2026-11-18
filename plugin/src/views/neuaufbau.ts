@@ -1,6 +1,6 @@
 import { App, Modal, Notice } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { NeuaufbauStand, neuaufbauZeilen, startKnopf } from "../core/neuaufbau";
+import { NeuaufbauStand, fortsetzbar, gueltigesSeit, neuaufbauZeilen, startKnopf } from "../core/neuaufbau";
 
 const NEU_LESEN_MS = 15_000;
 
@@ -20,13 +20,27 @@ export class NeuaufbauModal extends Modal {
     const el = this.contentEl;
     el.addClass("sb-capture");
     this.titleEl.setText("Alles neu aufbauen");
-    el.createDiv({ text: "Rechnet Aufgaben, Entscheidungen, Themen-Log und Stand aus den Ursprungsdaten neu: aus dem "
-      + "Material der Termin-Notizen und aus den Mails und Dokumenten, die das Einarbeiten ins Archiv gelegt hat." });
-    el.createDiv({ cls: "sb-muted", text: "Gerechnet wird in einer Kopie neben dem Vault. Dieser Vault bleibt, wie er ist; "
-      + "am Ende steht in der Kopie ein Vergleich vorher/nachher. Umgeschaltet wird von Hand: Obsidian schließen, die "
-      + "Ordner umbenennen – der alte bleibt als Sicherung." });
+    el.createDiv({ text: "Rechnet Aufgaben, Entscheidungen, Themen-Log und Stand aus den Ursprungsdaten neu: aus allen "
+      + "Termin-Notizen – auch den alten im Archiv, die ältesten zuerst – und aus den Mails und Dokumenten, die das "
+      + "Einarbeiten ins Archiv gelegt hat." });
+    el.createDiv({ cls: "sb-fehler", text: "Dieser Vault bleibt dabei unverändert. Das Ergebnis entsteht in einer Kopie "
+      + "neben dem Vault („Ordner der Kopie öffnen“). Erst wenn du die Ordner tauschst, arbeitest du mit dem neuen Stand." });
+    el.createDiv({ cls: "sb-muted", text: "Am Ende steht in der Kopie ein Vergleich vorher/nachher. Tauschen: Obsidian "
+      + "schließen, den Vault-Ordner umbenennen (er bleibt als Sicherung), die Kopie auf seinen Namen umbenennen." });
     el.createDiv({ cls: "sb-muted", text: "Das dauert je Termin einige Minuten am Modell-Server, zusammen leicht Stunden. "
       + "Solange läuft keine Automatik. Ein abgebrochener Neuaufbau lässt sich fortsetzen." });
+    // Wie weit zurueck? Mit allen alten Notizen rechnet der Neuaufbau leicht laenger als einen Tag.
+    const seitZeile = el.createDiv({ cls: "sb-line" });
+    seitZeile.createSpan({ text: "Alte Termin-Notizen neu rechnen ab " });
+    const seit = seitZeile.createEl("input", { type: "date" });
+    seit.value = gueltigesSeit(this.plugin.settings.neuaufbauSeit);
+    seit.onchange = () => {
+      this.plugin.settings.neuaufbauSeit = gueltigesSeit(seit.value);
+      void this.plugin.saveSettings();
+    };
+    seitZeile.createSpan({ cls: "sb-muted", text: " (leer = alle; die neuen Termine kommen immer alle)" });
+    el.createDiv({ cls: "sb-muted", text: "Das Datum gilt, wenn eine Kopie neu angelegt wird („Neuaufbau starten“, "
+      + "„Neu beginnen“) – beim Fortsetzen bleibt, was die Kopie festgelegt hat." });
     this.standEl = el.createDiv({ cls: "sb-auto-liste" });
     this.knoepfeEl = el.createDiv({ cls: "sb-buttons" });
     void this.zeigen();
@@ -61,9 +75,17 @@ export class NeuaufbauModal extends Modal {
     const start = bar.createEl("button", { text: startKnopf(s, laeuft), cls: "mod-cta" });
     start.disabled = laeuft || !this.plugin.isDesktop;
     start.onclick = () => {
-      void this.plugin.neuaufbauStarten();
+      void this.plugin.neuaufbauStarten(false, this.plugin.settings.neuaufbauSeit);
       void this.zeigen();
     };
+    if (fortsetzbar(s) && !laeuft && this.plugin.isDesktop) {
+      // eine angefangene Kopie liegen lassen und frisch beginnen - etwa, weil sie ohne die alten Notizen entstand
+      const neu = bar.createEl("button", { text: "Neu beginnen" });
+      neu.onclick = () => {
+        void this.plugin.neuaufbauStarten(true, this.plugin.settings.neuaufbauSeit);
+        void this.zeigen();
+      };
+    }
     const bericht = s?.vergleich?.bericht;
     if (bericht) {
       const auf = bar.createEl("button", { text: "Vergleich öffnen" });

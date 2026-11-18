@@ -731,6 +731,33 @@ def t_neuaufbau_schuetzt_den_vault():
         ok(code == 1 and r["grund"] == "PermissionError: gesperrt" and "Traceback" in err.getvalue(),
            f"ein unerwarteter Fehler steht mit Art und Text im Ergebnis: {r}")
 
+    # Alte Termin-Notiz: ihr Text wird Material - eigene Ueberschriften ruecken unter die Mitschrift
+    alt = "# Runde vom Juni\n\nWir haben viel besprochen.\n\n## Entscheidungen\n- Budget frei\n\n```\n## kein Kopf\n```\n### Tief\nText\n"
+    m = neuaufbau.als_material(alt)
+    ok(m.startswith("## Mitschrift\n\n### Runde vom Juni") and "### Entscheidungen\n- Budget frei" in m and "#### Tief" in m
+       and "```\n## kein Kopf\n```" in m, f"Ueberschriften ruecken ein, Code bleibt:\n{m}")
+    voll = "---\ntype: meeting\n---\n\n" + m
+    ok("Budget frei" in nachbereiten.find_material(voll) and "Wir haben viel besprochen" in nachbereiten.find_material(voll),
+       "der ganze alte Text zaehlt als Material")
+    eq(nachbereiten.ms.section_text(voll, "## Actions").strip(), "", "die neuen Abschnitte stehen leer bereit:")
+    archiv = nachbereiten.vp.MEETINGS_DIR / "2026-06" / "2026-06-29 - runde.md"
+    basis = {"processed": True, "date": "2026-06-29"}
+    eq([neuaufbau._ist_alte_notiz(archiv, fm) for fm in (
+        {**basis, "type": "meeting"}, basis, {**basis, "type": "email-thread"}, {**basis, "type": "migration-report"},
+        {"type": "meeting", "date": "2026-06-29"}, {"type": "meeting", "processed": True})],
+       [True, True, False, False, False, False], "eingearbeitet, datiert, kein Bericht und keine Mail:")
+    ok(not neuaufbau._ist_alte_notiz(nachbereiten.ACTIVE_DIR / "x.md", {**basis, "type": "meeting"}), "nur im Archiv")
+
+    # Reihenfolge: wie die Termine stattfanden - nach Datum, nicht nach Dateiname
+    import auto
+    daten = {"2026-09-01 - neu.md": "2026-09-01", "Alte Runde ohne Datum im Namen.md": "2025-04-08",
+             "2026-03-16-mitte.md": "2026-03-16", "zzz ohne datum.md": ""}
+    with _AttrGuard(auto, requested_notes=lambda: [Path("active-meetings") / n for n in daten]), \
+            _AttrGuard(neuaufbau.vp, read_frontmatter_head=lambda p, max_bytes=8192: {"date": daten[Path(p).name]}):
+        eq([p.name for p in neuaufbau._vorgemerkt()],
+           ["Alte Runde ohne Datum im Namen.md", "2026-03-16-mitte.md", "2026-09-01 - neu.md", "zzz ohne datum.md"],
+           "die aeltesten zuerst, Undatiertes zuletzt:")
+
     kopie = Path(tempfile.mkdtemp(prefix="neuaufbau-")) / "kopie"
     r = neuaufbau.anlegen(kopie)
     ok(r["ok"] and (kopie / ".2ndbrain" / "daten" / neuaufbau.MARKE).is_file(), f"Kopie mit Marke: {r}")

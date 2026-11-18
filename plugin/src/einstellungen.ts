@@ -29,6 +29,7 @@ export interface SecondBrainSettings {
   collapsed: Record<string, boolean>;   // Abschnitte in "Heute": zugeklappt?
   wartend: Wartend[];        // Aenderungen an Terminen, die gerade nachbereitet werden (main.wartendAbarbeiten)
   ableitungGesehen: number;  // bis zu welchem Stand der Ableitung der Neuaufbau angeboten wurde (core/neuaufbau.ts)
+  neuaufbauSeit: string;     // Neuaufbau: alte Termin-Notizen erst ab diesem Datum (JJJJ-MM-TT), leer = alle
 }
 
 export const DEFAULT_SETTINGS: SecondBrainSettings = {
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: SecondBrainSettings = {
   collapsed: { nacharbeit: true },
   wartend: [],
   ableitungGesehen: ABLEITUNG_STAND,
+  neuaufbauSeit: "",
 };
 
 export class SecondBrainSettingTab extends PluginSettingTab {

@@ -5,8 +5,8 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung, neuaufbauZeilen,
-  startKnopf,
+  ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, fortsetzbar, gueltigesSeit, neuaufbauAuswerten,
+  neuaufbauMeldung, neuaufbauZeilen, ohneAlteTermine, startArgs, startKnopf,
 } from "../src/core/neuaufbau";
 import { neuaufbauKopien, neuaufbauStand } from "../src/desktop/neuaufbau";
 
@@ -75,6 +75,31 @@ test("Stand von der Platte: die jüngste Kopie neben dem Vault, ohne die Engine 
 
   writeFileSync(join(neu, ".2ndbrain", "daten", "neuaufbau.json"), "{kaputt", "utf8");
   assert.equal(neuaufbauStand(vault).ok, false, "eine unlesbare Marke ist ein Fehler, kein leerer Stand");
+});
+
+test("Umfang und Neu beginnen: eine Kopie ohne die alten Termin-Notizen wird erkannt", () => {
+  const alt: NeuaufbauStand = { ok: true, stufe: "baut", nachbereitet: 1, gesamt: 41,
+                                zurueckgesetzt: { termine: 41, mails_zurueck: 20 } };
+  assert.equal(ohneAlteTermine(alt), true, "bis 0.13.2 angelegt: kein Zähler für alte Notizen");
+  assert.equal(fortsetzbar(alt), true);
+  const z = neuaufbauZeilen(alt);
+  assert.ok(z.some((x) => x.text === "Umfang: 41 Termine mit Material, 20 Mails und Dokumente – die ältesten zuerst"));
+  assert.ok(z.some((x) => x.fehler && x.text.includes("Neu beginnen")), "der Hinweis auf den Neustart");
+
+  const neu: NeuaufbauStand = { ok: true, stufe: "baut", zurueckgesetzt: { termine: 23, alte_termine: 209, mails_zurueck: 20 } };
+  assert.equal(ohneAlteTermine(neu), false);
+  assert.ok(neuaufbauZeilen(neu).some((x) => x.text.startsWith("Umfang: 23 Termine mit Material, 209 alte Termin-Notizen, 20 Mails")));
+  assert.equal(fortsetzbar({ ok: true, stufe: "verglichen" }), false, "ein fertiger Neuaufbau braucht keinen zweiten Knopf");
+  assert.equal(ohneAlteTermine({ ok: true, stufe: "verglichen", zurueckgesetzt: { termine: 5 } }), false);
+});
+
+test("Start: Neu beginnen und das Datum, ab dem alte Notizen neu gerechnet werden", () => {
+  assert.deepEqual(startArgs(false, ""), ["neuaufbau", "alles", "--json"]);
+  assert.deepEqual(startArgs(true, "2026-06-01"), ["neuaufbau", "alles", "--json", "--neu", "--seit", "2026-06-01"]);
+  assert.deepEqual(startArgs(false, " 2026-06-01 "), ["neuaufbau", "alles", "--json", "--seit", "2026-06-01"]);
+  assert.deepEqual(startArgs(false, "01.06.2026"), ["neuaufbau", "alles", "--json"], "kein Datum: nichts begrenzen");
+  assert.equal(gueltigesSeit("2026-02-30"), "", "ein Tag, den es nicht gibt");
+  assert.equal(gueltigesSeit("2026-13-01"), "");
 });
 
 test("Kein Ergebnis von der Engine: die Meldung nennt den Grund und den Ausweg", () => {

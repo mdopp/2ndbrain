@@ -26,7 +26,9 @@ import { AutomatikModal } from "./views/automatik";
 import { NeuaufbauModal } from "./views/neuaufbau";
 import { TriageModal } from "./views/triage";
 import { TriageErgebnis, TriagePunkt, Vorschlag, anwendenArgs } from "./core/triage";
-import { ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung } from "./core/neuaufbau";
+import {
+  ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung, startArgs,
+} from "./core/neuaufbau";
 import { FokusAenderung, FokusModal } from "./views/fokus";
 import { ChatState, ChatView, VIEW_TYPE_CHAT, newChatState } from "./views/chat";
 import { AnleitungView, VIEW_TYPE_ANLEITUNG } from "./views/anleitung";
@@ -382,7 +384,7 @@ export default class SecondBrainPlugin extends Plugin {
   /** `2ndbrain neuaufbau`: alles neu aufbauen - in einer Kopie neben dem Vault, dieser bleibt unveraendert.
    *  Laeuft in der Warteschlange der Engine (Stunden): solange wartet die Automatik; ein Abbruch laesst sich
    *  mit demselben Befehl fortsetzen. */
-  async neuaufbauStarten(): Promise<void> {
+  async neuaufbauStarten(neu = false, seit = ""): Promise<void> {
     if (!this.desktop || this.neuaufbauLaeuft) return;
     this.neuaufbauLaeuft = true;
     void this.neuaufbauGesehen();
@@ -397,7 +399,9 @@ export default class SecondBrainPlugin extends Plugin {
         this.neuaufbauLetzteMeldung = `Neuaufbau nicht gestartet – die Engine passt nicht: ${st.text} `
           + `(Einstellungen → 2ndBrain → Engine → ${st.state === "fehlt" ? "Installieren" : "Aktualisieren"})`;
       } else {
-        const lauf = await this.engine.run(["neuaufbau", "alles", "--json"], { timeoutMs: 24 * 3600_000 });
+        // `neu`: eine angefangene Kopie liegen lassen und frisch beginnen. Sieben Tage: mit den alten
+        // Termin-Notizen sind es Hunderte Termine zu je einigen Minuten.
+        const lauf = await this.engine.run(startArgs(neu, seit), { timeoutMs: 7 * 24 * 3600_000 });
         const { ergebnis, grund } = neuaufbauAuswerten(lauf);
         this.neuaufbauLetzteMeldung = ergebnis ? neuaufbauMeldung(ergebnis) : `Neuaufbau nicht gelaufen: ${grund}`;
       }

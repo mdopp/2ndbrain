@@ -277,6 +277,11 @@ zeigt es weiter an, bis du den Neuaufbau geöffnet hast. Das Fenster zeigt den F
 Termine, wie lange noch), setzt einen abgebrochenen Neuaufbau fort und öffnet am Ende den Vergleich und
 den Ordner der Kopie.
 
+Neu gerechnet werden alle Termin-Notizen, auch die alten im Archiv, in der Reihenfolge ihres Datums.
+**Dein Vault bleibt dabei unverändert** – das Ergebnis entsteht in der Kopie daneben, und erst wenn du
+die Ordner tauschst, arbeitest du damit. „Neu beginnen“ lässt eine angefangene Kopie liegen und fängt
+frisch an.
+
 Ändert sich mit einer neuen Version, wie
 2ndBrain Aufgaben oder den Stand ableitet, rechnet der Neuaufbau den Bestand aus dem Material der
 Termine und aus den eingearbeiteten Mails und Dokumenten neu – in einer Kopie neben dem Vault. Dein

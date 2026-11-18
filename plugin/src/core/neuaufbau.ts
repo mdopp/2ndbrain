@@ -16,7 +16,19 @@ export interface NeuaufbauStand {
   ok: boolean; kopie?: boolean; stufe?: string; ziel?: string; am?: string; hinweis?: string; grund?: string;
   ausweg?: string; nachbereitet?: number; gesamt?: number; zuletzt?: string; sekunden_je_termin?: number;
   eingearbeitet?: number; fehler?: string[]; vergleich?: NeuaufbauVergleich;
-  zurueckgesetzt?: { termine?: number; termine_ohne_material?: number; mails_zurueck?: number; mails_bleiben?: number };
+  zurueckgesetzt?: { termine?: number; alte_termine?: number; seit?: string; termine_ohne_material?: number;
+                     mails_zurueck?: number; mails_bleiben?: number };
+}
+
+/** Eine angefangene Kopie aus einer Version, die die alten Termin-Notizen noch ausliess (bis 0.13.2): Fortsetzen
+ *  rechnet dann nur die neuen. Wer alle will, beginnt neu. */
+export function ohneAlteTermine(s: NeuaufbauStand | null): boolean {
+  return !!s?.ok && FORTSETZBAR.includes(s.stufe ?? "") && !!s.zurueckgesetzt && s.zurueckgesetzt.alte_termine === undefined;
+}
+
+/** Laesst sich fortsetzen? Dann gibt es daneben „Neu beginnen“. */
+export function fortsetzbar(s: NeuaufbauStand | null): boolean {
+  return !!s?.ok && FORTSETZBAR.includes(s.stufe ?? "");
 }
 
 /** Ergebnis von `2ndbrain neuaufbau alles --json`. */
@@ -72,6 +84,17 @@ export function neuaufbauZeilen(s: NeuaufbauStand | null): { text: string; fehle
     out.push({ text: s.grund ?? "Das Modell fehlte.", fehler: true });
     if (s.ausweg) out.push({ text: s.ausweg });
   }
+  const z = s.zurueckgesetzt;
+  if (z) {
+    out.push({ text: `Umfang: ${z.termine ?? 0} Termine mit Material`
+      + (z.alte_termine !== undefined ? `, ${z.alte_termine} alte Termin-Notizen`
+        + (z.seit ? ` (ab ${z.seit.slice(8, 10)}.${z.seit.slice(5, 7)}.${z.seit.slice(0, 4)})` : "") : "")
+      + `, ${z.mails_zurueck ?? 0} Mails und Dokumente – die ältesten zuerst` });
+  }
+  if (ohneAlteTermine(s)) {
+    out.push({ text: "Diese Kopie entstand ohne die alten Termin-Notizen aus dem Archiv. „Neu beginnen“ schließt sie ein.",
+               fehler: true });
+  }
   if (typeof s.nachbereitet === "number" && typeof s.gesamt === "number" && s.gesamt > 0) {
     const rest = s.gesamt - s.nachbereitet;
     out.push({ text: `${s.nachbereitet} von ${s.gesamt} Terminen nachbereitet`
@@ -85,6 +108,21 @@ export function neuaufbauZeilen(s: NeuaufbauStand | null): { text: string; fehle
   }
   if (s.fehler?.length) out.push({ text: `${s.fehler.length} nicht neu gerechnet – Gründe im Vergleich`, fehler: true });
   return out;
+}
+
+/** „2026-06-01“ oder leer - alles andere gilt nicht als Datum (und begrenzt dann nichts). */
+export function gueltigesSeit(seit: string): string {
+  const s = (seit ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? "" : s;
+}
+
+/** Die Argumente fuer `2ndbrain neuaufbau alles`: `neu` beginnt eine frische Kopie, `seit` rechnet alte
+ *  Termin-Notizen erst ab diesem Datum neu. Beim Fortsetzen gilt, was die Kopie beim Anlegen festgelegt hat. */
+export function startArgs(neu: boolean, seit: string): string[] {
+  const s = gueltigesSeit(seit);
+  return ["neuaufbau", "alles", "--json", ...(neu ? ["--neu"] : []), ...(s ? ["--seit", s] : [])];
 }
 
 interface Lauf { code: number; stdout: string; stderr: string }
