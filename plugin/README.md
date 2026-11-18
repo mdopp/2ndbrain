@@ -16,7 +16,7 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.13.0)
+## Was es kann (0.13.1)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|

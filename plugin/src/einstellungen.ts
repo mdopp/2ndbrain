@@ -4,6 +4,8 @@ import type SecondBrainPlugin from "./main";
 import type { Wartend } from "./core/nacherfassen";
 import type { SkillRecipe } from "./core/rezepte";
 import { CAL_CONFIG, Json, LLM_CONFIG, LOCAL_CONFIG, PROTOKOLL_VORLAGE, calendarSourceKind, getPath } from "./konfiguration";
+import { ABLEITUNG_STAND, angebotFaellig, neuaufbauZeilen, startKnopf } from "./core/neuaufbau";
+import { NeuaufbauModal } from "./views/neuaufbau";
 
 /** Kopie der Vault-Konfiguration fuer Geraete, auf denen .2ndbrain/ fehlt (Handy):
  *  der Desktop schreibt sie, die Plugin-Daten synchronisieren sie mit. */
@@ -26,6 +28,7 @@ export interface SecondBrainSettings {
   likec4Port: number;
   collapsed: Record<string, boolean>;   // Abschnitte in "Heute": zugeklappt?
   wartend: Wartend[];        // Aenderungen an Terminen, die gerade nachbereitet werden (main.wartendAbarbeiten)
+  ableitungGesehen: number;  // bis zu welchem Stand der Ableitung der Neuaufbau angeboten wurde (core/neuaufbau.ts)
 }
 
 export const DEFAULT_SETTINGS: SecondBrainSettings = {
@@ -37,6 +40,7 @@ export const DEFAULT_SETTINGS: SecondBrainSettings = {
   likec4Port: 5188,
   collapsed: { nacharbeit: true },
   wartend: [],
+  ableitungGesehen: ABLEITUNG_STAND,
 };
 
 export class SecondBrainSettingTab extends PluginSettingTab {
@@ -64,6 +68,7 @@ export class SecondBrainSettingTab extends PluginSettingTab {
     containerEl.empty();
     this.renderHelp(containerEl);
     this.renderEngine(containerEl);
+    await this.renderNeuaufbau(containerEl);
     this.renderVaultConfig(containerEl, local, llm);
     this.renderCalendar(containerEl, typeof cal?.ical_url === "string" && cal.ical_url.trim() !== "");
     this.renderLikec4(containerEl, local);
@@ -163,6 +168,27 @@ export class SecondBrainSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           this.plugin.scheduleAutomatik();
         }));
+  }
+
+  // ------------------------------------------------- Alles neu aufbauen
+
+  /** Der Neuaufbau als eigener Abschnitt: was er tut, wo der letzte steht, und der Knopf dazu - damit man ihn
+   *  findet, ohne den Befehl zu kennen. Nach einem Update, das die Ableitung aendert, steht der Hinweis dabei. */
+  private async renderNeuaufbau(el: HTMLElement): Promise<void> {
+    const stand = await this.plugin.neuaufbauStand();
+    const faellig = angebotFaellig(this.plugin.settings.ableitungGesehen);
+    new Setting(el).setName("Alles neu aufbauen").setHeading()
+      .setDesc("Rechnet Aufgaben, Entscheidungen, Themen-Log und Stand aus den Ursprungsdaten neu – in einer Kopie "
+        + "neben dem Vault, mit einem Vergleich vorher/nachher. Dieser Vault bleibt, wie er ist."
+        + (faellig ? " Diese Version leitet Aufgaben anders ab als die davor: der Bestand ist noch im alten Zustand." : ""));
+    const s = new Setting(el)
+      .setName(faellig ? "Neuaufbau empfohlen" : "Neuaufbau")
+      .setDesc(neuaufbauZeilen(stand).map((z) => z.text).join(" · "));
+    s.addButton((b) => {
+      b.setButtonText(startKnopf(stand, this.plugin.neuaufbauLaeuft) + " …");
+      if (faellig) b.setCta();
+      b.onClick(() => new NeuaufbauModal(this.app, this.plugin).open());
+    });
   }
 
   // --------------------------------------------- Vault-Konfiguration (.2ndbrain)

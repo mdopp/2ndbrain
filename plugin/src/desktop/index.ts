@@ -5,6 +5,8 @@ import { homedir } from "os";
 import { Engine } from "./engine";
 import { Likec4Server } from "./likec4";
 import { PythonInfo, execProbe, findPython, venvDir, venvPython } from "./python";
+import { neuaufbauStand, oeffneImSystem } from "./neuaufbau";
+import type { NeuaufbauStand } from "../core/neuaufbau";
 
 export type { Likec4Paths } from "./likec4";
 export type { PythonInfo } from "./python";
@@ -18,6 +20,10 @@ export interface DesktopServices {
   venvPython(dir: string): string;
   platform: string;
   pid: number;
+  /** Stand des juengsten Neuaufbaus neben dem Vault - von der Platte, ohne die Engine */
+  neuaufbauStand(): NeuaufbauStand;
+  /** Datei oder Ordner im Explorer/Finder oeffnen */
+  oeffneImSystem(pfad: string): Promise<boolean>;
 }
 
 export function createDesktop(basePath: string, python: () => Promise<string | null>,
@@ -31,5 +37,7 @@ export function createDesktop(basePath: string, python: () => Promise<string | n
     venvPython: (dir) => venvPython(dir, process.platform),
     platform: process.platform,
     pid: process.pid,
+    neuaufbauStand: () => neuaufbauStand(basePath),
+    oeffneImSystem,
   };
 }

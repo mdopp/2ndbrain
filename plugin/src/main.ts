@@ -26,7 +26,7 @@ import { AutomatikModal } from "./views/automatik";
 import { NeuaufbauModal } from "./views/neuaufbau";
 import { TriageModal } from "./views/triage";
 import { TriageErgebnis, TriagePunkt, Vorschlag, anwendenArgs } from "./core/triage";
-import { NeuaufbauErgebnis, NeuaufbauStand, neuaufbauMeldung } from "./core/neuaufbau";
+import { ABLEITUNG_STAND, NeuaufbauErgebnis, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauMeldung } from "./core/neuaufbau";
 import { FokusAenderung, FokusModal } from "./views/fokus";
 import { ChatState, ChatView, VIEW_TYPE_CHAT, newChatState } from "./views/chat";
 import { AnleitungView, VIEW_TYPE_ANLEITUNG } from "./views/anleitung";
@@ -197,6 +197,7 @@ export default class SecondBrainPlugin extends Plugin {
     await this.refreshLlm();
     if (!this.desktop) return;
     if (this.settings.wartend.length) void this.wartendAbarbeiten();   // vorgemerkt vor dem Neustart
+    this.neuaufbauAnbieten();                                          // nach einem Update, das die Ableitung aendert
     await this.nachziehenLesen();
     if (await this.letztenLaufLesen()) await this.refreshViews();      // „mit Fehlern“ auch nach dem Neustart
     await this.resolvePython();
@@ -343,10 +344,39 @@ export default class SecondBrainPlugin extends Plugin {
   /** Rechnet gerade ein Neuaufbau (in diesem Obsidian gestartet)? */
   neuaufbauLaeuft = false;
 
-  /** `2ndbrain neuaufbau stand`: der juengste Neuaufbau neben dem Vault. */
+  /** Der juengste Neuaufbau neben dem Vault - von der Platte gelesen, nicht ueber die Engine: solange der
+   *  Neuaufbau rechnet, stuende die Frage hinter ihm in der Warteschlange. */
   async neuaufbauStand(): Promise<NeuaufbauStand | null> {
-    if (!this.desktop) return null;
-    return this.engine.json<NeuaufbauStand>(["neuaufbau", "stand", "--json"], { timeoutMs: 60_000 });
+    return this.desktop ? this.desktop.neuaufbauStand() : null;
+  }
+
+  /** Datei oder Ordner ausserhalb des Vaults im Explorer/Finder oeffnen (die Kopie, ihr Vergleich). */
+  async oeffneImSystem(pfad: string): Promise<boolean> {
+    return this.desktop ? this.desktop.oeffneImSystem(pfad) : false;
+  }
+
+  /** Das Angebot zum Neuaufbau gilt fuer diesen Stand der Ableitung als gesehen. */
+  async neuaufbauGesehen(): Promise<void> {
+    if (this.settings.ableitungGesehen === ABLEITUNG_STAND) return;
+    this.settings.ableitungGesehen = ABLEITUNG_STAND;
+    await this.saveSettings();
+  }
+
+  /** Nach einem Update, das Aufgaben oder Stand anders ableitet: den Neuaufbau einmal anbieten. Die Meldung
+   *  bleibt stehen, bis man sie anklickt; der Abschnitt in den Einstellungen weist weiter darauf hin. */
+  private neuaufbauAnbieten(): void {
+    if (!this.desktop || !angebotFaellig(this.settings.ableitungGesehen)) return;
+    const f = document.createDocumentFragment();
+    f.createDiv({ text: "2ndBrain: Diese Version leitet Aufgaben und Stand anders ab. Der Bestand ist noch im alten Zustand." });
+    const zeile = f.createDiv({ cls: "sb-buttons" });
+    const notiz = new Notice(f, 0);
+    const ja = zeile.createEl("button", { text: "Alles neu aufbauen …", cls: "mod-cta" });
+    ja.onclick = () => {
+      notiz.hide();
+      new NeuaufbauModal(this.app, this).open();
+    };
+    const spaeter = zeile.createEl("button", { text: "Später" });
+    spaeter.onclick = () => notiz.hide();       // bleibt faellig: steht weiter in den Einstellungen
   }
 
   /** `2ndbrain neuaufbau`: alles neu aufbauen - in einer Kopie neben dem Vault, dieser bleibt unveraendert.
@@ -355,6 +385,7 @@ export default class SecondBrainPlugin extends Plugin {
   async neuaufbauStarten(): Promise<void> {
     if (!this.desktop || this.neuaufbauLaeuft) return;
     this.neuaufbauLaeuft = true;
+    void this.neuaufbauGesehen();
     new Notice("2ndBrain: Neuaufbau gestartet – in einer Kopie neben dem Vault. Das dauert; der Stand steht unter "
       + "„Alles neu aufbauen“.", 15_000);
     try {
@@ -441,9 +472,12 @@ export default class SecondBrainPlugin extends Plugin {
   // ------------------------------------------------------------ Einstellungen
 
   async loadSettings(): Promise<void> {
-    const s = ((await this.loadData()) as Partial<SecondBrainSettings> | null) ?? {};
+    const roh = (await this.loadData()) as Partial<SecondBrainSettings> | null;
+    const s = roh ?? {};
     this.settings = { ...DEFAULT_SETTINGS, ...s, spiegel: { ...DEFAULT_SETTINGS.spiegel, ...(s.spiegel ?? {}) },
-                      wartend: Array.isArray(s.wartend) ? s.wartend : [] };
+                      wartend: Array.isArray(s.wartend) ? s.wartend : [],
+                      // ein frisch eingerichteter Vault hat keinen alten Bestand, ein bestehender den von vorher
+                      ableitungGesehen: ableitungBeimStart(s.ableitungGesehen, roh !== null) };
   }
 
   async saveSettings(): Promise<void> {

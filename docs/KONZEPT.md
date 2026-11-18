@@ -700,6 +700,11 @@ geändert hat (Befund 17.11.2026 am eigenen Vault: 13 Briefing-Zeilen mit dersel
   „Projekt auf rot“ nur, wenn sonst nichts begründet. Ein Vorgänger, der nur über einen ähnlichen Titel unter
   der Schwelle der Historie (0,80) gefunden wurde, gilt nicht als Vorgänger; die Vorbereitung nennt ihn als
   „am ähnlichsten“ und bittet um Zuordnung der Reihe.
+- **Jourfix nach Richtung.** Die Vorbereitung eines Jourfix oder 1:1 beginnt je Person mit drei kurzen Listen
+  (je höchstens drei Punkte): *Bei X am längsten offen* (mit Alter), *Du schuldest X* und *Zum Übergeben an X*
+  (die Übergabe-Vorschläge der Triage an diese Person, §23). „Ich schulde“ heißt: mein offener Punkt stammt aus
+  einem Termin dieser Reihe, nennt die Person mit vollem Namen, oder nennt ihren Vornamen in einem Thema, an
+  dem sie beteiligt ist – ein Vorname allein ordnet nie zu. Die vollständigen Listen stehen darunter (live).
 - **Lagebild** (`reports/lagebild.md`, `2ndbrain lagebild`, in der Automatik mit `stand`): Zusagen je Person als
   Balken mit typischem Alter (fett ab 30 Tagen – „hängt“), das Themen-Radar (offene Punkte gegen Tage seit der
   letzten Bewegung, gemessen am jüngsten Eintrag im Vault, Farbe = Ampel) und die Abläufe des Kanons, jeder
@@ -765,6 +770,15 @@ Schritt prüft die Marke `.2ndbrain/daten/neuaufbau.json`, die nur in einer Kopi
 | `zuruecksetzen` | Stand vorher festhalten; Termine mit Material: Nachbereitung zurücknehmen (Sicherung, sonst Entscheidungen/Actions/Parkplatz/Kernteil leeren), aus dem Archiv zurück, vormerken; Mails und Dokumente zurück in den Eingang; aus den Themen heraus, was aus diesen Quellen stammt (Log-Zeilen, übernommene Punkte) |
 | `bauen` | jeden Termin einzeln nachbereiten und ins Themen-Log (Fortschritt nach jedem Termin, fortsetzbar), Eingang einarbeiten, Altbestand, Archiv, Stand, Personen; was vorher erledigt oder verworfen war, ist es wieder |
 | `vergleichen` | `reports/neuaufbau-vergleich.md`: Zahlen vorher/nachher, je Thema, was wegfällt, was dazukommt |
+
+**Im Plugin.** Der Neuaufbau hat einen eigenen Abschnitt in den Einstellungen (Stand des letzten, Knopf) und
+das Fenster „Alles neu aufbauen“: Es liest den Fortschritt alle 15 Sekunden direkt aus der Marke der Kopie
+(`desktop/neuaufbau.ts` – die Engine kann man nicht fragen, solange sie rechnet), setzt einen angefangenen
+Neuaufbau fort und öffnet Vergleich und Ordner. **Angeboten wird er von selbst:** `ABLEITUNG_STAND`
+(`core/neuaufbau.ts`) zählt, wie oft sich die Ableitung geändert hat; das Plugin merkt sich in seinen Daten,
+welchen Stand der Nutzer gesehen hat (`ableitungGesehen`), und meldet sich nach einem Update einmal beim Start –
+ein frisch eingerichteter Vault ohne alten Bestand nicht. Wer eine Version baut, die Aufgaben, Entscheidungen
+oder den Stand anders ableitet, erhöht die Zahl.
 
 Ursprungsdaten sind das Material der Termin-Notizen (Transkript, Mitschrift, eigene Notizen) und die Mails
 und Dokumente, die das Einarbeiten ins Archiv gelegt hat. Termin-Notizen ohne Material (alte Notizen) bleiben,

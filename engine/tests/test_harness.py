@@ -1013,9 +1013,52 @@ def t_altbestand_parkt_nur_alt_und_ohne_frist():
     eq(altbestand.parken(today=heute)["je_thema"].get("park-thema"), None, "ein zweiter Lauf findet nichts mehr:")
 
 
+# ───────────────────────────────────────── 13. Jourfix nach Richtung
+
+def t_jourfix_nach_richtung():
+    """Drei Richtungen, je hoechstens drei Punkte: bei der Person am laengsten offen, ich schulde,
+    zum Uebergeben. Ein Vorname allein ordnet nie zu - nur in einem Thema der Person."""
+    import vorbereiten
+    import triage
+    import themen
+    import aufgaben
+    from datetime import date as _date
+    T = lambda text, owner, created, path="active-meetings/x.md", topics=("betrieb",), due=None: aufgaben.Task(   # noqa: E731
+        status=" ", text=text, owner=owner, created=created, path=path, topics=list(topics), due=due)
+    punkte = [T("Doku zusammenfuehren", "bert", "2026-08-03"), T("Zeitplan setzen", "bert", "2026-08-24"),
+              T("Update planen", "bert", "2026-09-07"), T("Viertes von Bert", "bert", "2026-09-14"),
+              T("Formular einreichen", "ich", "2026-09-07", path="active-meetings/2026-09-07 - jourfix - Bert.md"),
+              T("Mit Bert Direkt das Budget ansehen", "ich", "2026-09-10", topics=("fremd",)),
+              T("Bert nach dem Stand fragen", "ich", "2026-09-11", topics=("betrieb",)),
+              T("Bert nach dem Wetter fragen", "ich", "2026-09-12", topics=("fremd",)),
+              T("Etwas ganz anderes", "ich", "2026-09-01", topics=("fremd",)),
+              T("Erledigtes zaehlt nicht", "bert", "2026-07-01")]
+    punkte[-1].status = "x"
+    geben = {"offen": [{"vorschlag": "uebergeben", "an": "bert", "text": "Dashboard erstellen", "thema": "betrieb"},
+                       {"vorschlag": "uebergeben", "an": "wer-anders", "text": "Nicht fuer Bert", "thema": "betrieb"},
+                       {"vorschlag": "selbst", "an": "", "text": "Bleibt", "thema": "betrieb"}]}
+    reihe = [(Path("active-meetings/2026-09-07 - jourfix - Bert.md"), {})]
+    with _AttrGuard(aufgaben, scan=lambda: punkte), _AttrGuard(triage, vorschlaege=lambda **kw: geben), \
+            _AttrGuard(themen, _series_notes=lambda key, exclude=None: iter(reihe)):
+        z = vorbereiten._richtung("bert", "Bert Direkt", "jourfix-bert", {"betrieb"}, _date(2026, 9, 28), "ich")
+    text = "\n".join(z)
+    ok("**Bei Bert am längsten offen** (4 insgesamt)\n- Doku zusammenfuehren — seit 56 Tagen · [[betrieb]]" in text
+       and "Viertes von Bert" not in text and "Erledigtes" not in text, f"die drei aeltesten, mit Alter:\n{text}")
+    ok("**Du schuldest Bert** (3)" in text and "Formular einreichen" in text and "Mit Bert Direkt das Budget" in text
+       and "Bert nach dem Stand fragen" in text, f"aus der Reihe, voller Name, oder Vorname im Thema der Person:\n{text}")
+    ok("Wetter" not in text and "ganz anderes" not in text, "ein Vorname in einem fremden Thema ordnet nicht zu")
+    ok("**Zum Übergeben an Bert** (1)" in text and "- Dashboard erstellen · [[betrieb]]" in text and "Nicht fuer Bert" not in text,
+       f"nur Uebergabe-Vorschlaege an diese Person:\n{text}")
+    with _AttrGuard(aufgaben, scan=lambda: []), _AttrGuard(triage, vorschlaege=lambda **kw: {"offen": []}), \
+            _AttrGuard(themen, _series_notes=lambda key, exclude=None: iter([])):
+        eq(vorbereiten._richtung("bert", "Bert Direkt", "jourfix-bert", set(), _date(2026, 9, 28), "ich"), [],
+           "ohne Punkte steht nichts da:")
+
+
 # ───────────────────────────────────────── main
 
 TESTS = [
+    ("vorbereiten: Jourfix nach Richtung - laengst offen, ich schulde, zum Uebergeben", t_jourfix_nach_richtung),
     ("stand: Delta-Zeilen, Risiken in Gruppen, Beteiligte eingeklappt", t_stand_delta_und_risiko_gruppen),
     ("briefing: keine Schablonenfrage, Begruendung ohne Wiederholung, hoechstens sechs", t_briefing_ohne_schablone),
     ("lagebild: Zusagen je Person, Radar, Ablauf mit Ampel", t_lagebild_rechnet_die_bilder),

@@ -271,7 +271,13 @@ Beide schreibt die Automatik neu.
 
 ## Alles neu aufbauen
 
-Befehl „Alles neu aufbauen (in einer Kopie neben dem Vault)“. Ändert sich mit einer neuen Version, wie
+Einstellungen → 2ndBrain → „Alles neu aufbauen“ (oder der gleichnamige Befehl). Nach einem Update, das
+die Ableitung ändert, weist 2ndBrain beim Start einmal darauf hin; der Abschnitt in den Einstellungen
+zeigt es weiter an, bis du den Neuaufbau geöffnet hast. Das Fenster zeigt den Fortschritt (wie viele
+Termine, wie lange noch), setzt einen abgebrochenen Neuaufbau fort und öffnet am Ende den Vergleich und
+den Ordner der Kopie.
+
+Ändert sich mit einer neuen Version, wie
 2ndBrain Aufgaben oder den Stand ableitet, rechnet der Neuaufbau den Bestand aus dem Material der
 Termine und aus den eingearbeiteten Mails und Dokumenten neu – in einer Kopie neben dem Vault. Dein
 Vault bleibt, wie er ist. Am Ende steht in der Kopie `reports/neuaufbau-vergleich`: vorher gegen

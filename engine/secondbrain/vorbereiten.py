@@ -751,6 +751,65 @@ def build_prep(ev: dict, previous: dict | None, project: dict | None,
     return "\n".join(lines) + "\n"
 
 
+RICHTUNG_JE = 3              # so viele Punkte je Richtung nennt die Vorbereitung eines Jourfix
+
+
+def _richtung(person: str, name: str, key: str, themen_der_person: set[str], today: date,
+              self_slug: str) -> list[str]:
+    """Jourfix nach Richtung: was liegt bei der Person am laengsten, was schulde ich ihr, was kann
+    ich ihr uebergeben - je hoechstens RICHTUNG_JE Punkte, damit man im Termin damit anfaengt statt
+    mit einer Tabelle. Die vollstaendigen Listen stehen darunter (live).
+
+    "Ich schulde" heisst: mein offener Punkt stammt aus einem Termin dieser Reihe, nennt die Person
+    mit vollem Namen, oder nennt ihren Vornamen in einem Thema, an dem sie beteiligt ist - ein
+    Vorname allein ordnet nie zu."""
+    first = name.split()[0] if name else person
+    alle = [t for t in tk.scan() if t.is_open and t.kind == tk.KIND_TASK]
+
+    def alter(t: tk.Task) -> str:
+        try:
+            n = (today - date.fromisoformat(str(t.created))).days
+        except (TypeError, ValueError):
+            return ""
+        return f" — seit {n} Tagen" if n > 0 else ""
+
+    def zeile(t: tk.Task, zusatz: str = "") -> str:
+        frist = f" 📅 {t.due}" if t.due else ""
+        thema = f" · [[{t.topics[0]}]]" if t.topics else ""
+        return f"- {bf.kuerzen(' '.join(t.text.split()), 120)}{frist}{alter(t)}{thema}{zusatz}"
+
+    ihre = sorted((t for t in alle if t.owner == person), key=lambda t: (t.created or "9999", t.due or "9999"))
+    reihe = {f.stem for f, _ in th._series_notes(key)} if key else set()
+    voll = " ".join(name.casefold().split())
+    vorname_re = re.compile(rf"(?<![\w-]){re.escape(first.casefold())}(?![\w-])") if first else None
+
+    def schulde(t: tk.Task) -> bool:
+        text = " ".join(t.text.casefold().split())
+        return (Path(t.path or "").stem in reihe or (t.source or "") in reihe or (voll and voll in text)
+                or bool(vorname_re and vorname_re.search(text) and set(t.topics) & themen_der_person))
+
+    meine = sorted((t for t in alle if self_slug and t.owner == self_slug and schulde(t)),
+                   key=lambda t: (t.due or "9999", t.created or "9999"))
+    try:
+        import triage
+        geben = [e for e in triage.vorschlaege(mit_modell=False, heute=today)["offen"]
+                 if e["vorschlag"] == triage.UEBERGEBEN and e["an"] == person]
+    except Exception as e:                           # noqa: BLE001 - ohne Triage fehlt nur die dritte Richtung
+        print(f"[WARN] Jourfix ohne Übergabe-Vorschläge ({type(e).__name__}: {e})", file=sys.stderr)
+        geben = []
+
+    lines: list[str] = []
+    if ihre:
+        lines += [f"**Bei {first} am längsten offen** ({len(ihre)} insgesamt)"] + [zeile(t) for t in ihre[:RICHTUNG_JE]] + [""]
+    if meine:
+        lines += [f"**Du schuldest {first}** ({len(meine)})"] + [zeile(t) for t in meine[:RICHTUNG_JE]] + [""]
+    if geben:
+        lines += [f"**Zum Übergeben an {first}** ({len(geben)}) – bestätigen unter „Meine Woche“"] \
+            + [f"- {bf.kuerzen(' '.join(e['text'].split()), 120)}" + (f" · [[{e['thema']}]]" if e.get("thema") else "")
+               for e in geben[:RICHTUNG_JE]] + [""]
+    return lines
+
+
 def _person_sections(ev: dict, projects: dict[str, dict]) -> list[list[str]]:
     """Jourfix/1:1 mit ein bis zwei Personen: je Person ihre Themen (wo sie
     beteiligt ist), Zusagen, Fragen und Altbestand - der Termin braucht kein Thema."""
@@ -775,7 +834,16 @@ def _person_sections(ev: dict, projects: dict[str, dict]) -> list[list[str]]:
                          for slug, p in projects.items()
                          if person in {th._slug(b) for b in p.get("beteiligte") or []}),
                         key=lambda x: (rank.get(x[2], 3), x[1]))[:8]
-        out.append(ab.person_block(person, person_names.person(person) or person, topics))
+        name = person_names.person(person) or person
+        block = ab.person_block(person, name, topics)
+        # die drei Richtungen stehen vor den vollstaendigen Listen
+        try:
+            tag = date.fromisoformat(str(ev.get("date") or "")[:10])
+        except ValueError:
+            tag = date.today()
+        richtung = _richtung(person, name, key, {s for s, _, _ in topics}, min(tag, date.today()), bt.me())
+        at = next((i for i, l in enumerate(block) if l.startswith("**Zusagen und Fragen von")), len(block))
+        out.append(block[:at] + richtung + block[at:])
     return out
 
 

@@ -26,6 +26,32 @@ export interface NeuaufbauErgebnis {
   vergleich?: NeuaufbauVergleich;
 }
 
+/** Der Stand der Ableitung: um eins erhoehen, wenn eine Version Aufgaben, Entscheidungen oder den Stand anders
+ *  ableitet als die davor. Das Plugin merkt sich, welchen Stand der Nutzer gesehen hat, und bietet nach einem
+ *  Update den Neuaufbau an - sonst bliebe der Bestand im alten Zustand, ohne dass man es merkt.
+ *  1 = bis 0.12 · 2 = 0.13 (Aufgaben mit Art und Beleg, zusammengefuehrt; Stand als Delta) */
+export const ABLEITUNG_STAND = 2;
+
+/** Ist der Neuaufbau anzubieten? Ja, wenn die Ableitung neuer ist als das, was der Nutzer gesehen hat. */
+export function angebotFaellig(gesehen: number | undefined): boolean {
+  return (gesehen ?? 1) < ABLEITUNG_STAND;
+}
+
+/** Welchen Stand ein Vault mitbringt: frisch eingerichtet (keine Plugin-Daten) den aktuellen - da gibt es keinen
+ *  alten Bestand; sonst den vor der Einfuehrung des Merkers. */
+export function ableitungBeimStart(gespeichert: number | undefined, hatDaten: boolean): number {
+  if (typeof gespeichert === "number") return gespeichert;
+  return hatDaten ? 1 : ABLEITUNG_STAND;
+}
+
+const FORTSETZBAR = ["angelegt", "zurueckgesetzt", "baut", "unterbrochen"];
+
+/** Was der Start-Knopf sagt: ein angefangener Neuaufbau wird fortgesetzt, sonst beginnt ein neuer. */
+export function startKnopf(s: NeuaufbauStand | null, laeuft: boolean): string {
+  if (laeuft) return "Läuft …";
+  return s?.ok && FORTSETZBAR.includes(s.stufe ?? "") ? "Fortsetzen" : "Neuaufbau starten";
+}
+
 const STUFEN: Record<string, string> = {
   angelegt: "Kopie angelegt", zurueckgesetzt: "Abgeleitetes verworfen", baut: "rechnet",
   unterbrochen: "unterbrochen", gebaut: "neu gerechnet", verglichen: "fertig, Vergleich liegt vor",
