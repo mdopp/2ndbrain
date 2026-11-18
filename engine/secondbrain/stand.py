@@ -207,7 +207,74 @@ def facts(path: Path, open_tasks: list[tk.Task], meeting: tuple[str, str] | None
         "altbestand": sum(1 for t in tk.tasks_in_text(text, "topic", stem=path.stem) if t.pruefen),
         # von Hand (optional): wer fuehrt/entscheidet - laesst sich nicht ableiten
         "verantwortlich": _person_link(vp.split_frontmatter(text)[0].get("verantwortlich")),
+        # Stand als Delta: was ist neu, was braucht mich, welche Risiken stehen (in Gruppen)
+        "neu": neu_seit(alle_events(text), today),
+        "braucht_dich": braucht_mich(open_tasks, today),
+        "risiko_gruppen": risiko_gruppen(alle_events(text), today),
     }
+
+
+def alle_events(text: str) -> list[tuple[str, str, str]]:
+    """Alle Eintraege des Event Logs als (datum, art, text) - ungekuerzt (`prose_events` nimmt fuer die
+    Prosa nur die juengsten; fuer Zaehlen und Gruppieren braucht es alle im Zeitfenster)."""
+    out = []
+    for _, line in tk.section_lines(text, tk.EVENT_LOG_SECTION):
+        m = _EVENT_RE.match(line.strip())
+        if m:
+            out.append((m.group(1), m.group(2), m.group(3).strip()))
+    return out
+
+
+DELTA_TAGE = 14              # "Neu" sind Log-Eintraege der letzten zwei Wochen
+RISIKO_TAGE = 30             # wie die Ampel (ampel.recent_risks)
+
+
+def _kurz(text: str, limit: int) -> str:
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= limit else t[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def neu_seit(events: list[tuple[str, str, str]], today: date, tage: int = DELTA_TAGE) -> list[str]:
+    """Die juengsten Eintraege des Logs (ohne Risiken - die stehen in ihren Gruppen), hoechstens drei."""
+    ab = (today - timedelta(days=tage)).isoformat()
+    return [_kurz(t, 90) for d, k, t in sorted(events, reverse=True) if d >= ab and k != "RISK"][:3]
+
+
+def braucht_mich(open_tasks: list[tk.Task], today: date) -> dict:
+    """Meine offenen Punkte am Thema: Anzahl und die zwei dringendsten (Frist zuerst, sonst die aeltesten)."""
+    try:
+        import organisation
+        ich = organisation.ich()
+    except Exception:                                # noqa: BLE001 - ohne "ich" gibt es die Zeile nicht
+        ich = ""
+    meine = [t for t in open_tasks if ich and t.owner == ich and t.kind == tk.KIND_TASK and not t.pruefen]
+    meine.sort(key=lambda t: (t.due or "9999", t.created or ""))
+    return {"anzahl": len(meine),
+            "punkte": [_kurz(t.text, 70) + (f" (bis {_de(t.due)[:6]})" if t.due else "") for t in meine[:2]],
+            "ueberfaellig": sum(1 for t in meine if t.overdue(today.isoformat()))}
+
+
+def risiko_gruppen(events: list[tuple[str, str, str]], today: date, tage: int = RISIKO_TAGE) -> list[tuple[str, int]]:
+    """Die Risiken der letzten 30 Tage in Gruppen: [(name, anzahl)], die groesste zuerst. Zwanzig
+    Log-Zeilen sind selten zwanzig Risiken - "Lager Nord: Prozessreife", "Lager Nord:
+    Kapazitaet", "Lager Nord: Testkit" sind eines mit drei Seiten. Gruppiert wird nach dem
+    Stichwort vor dem Doppelpunkt, sonst nach aehnlichem Wortlaut."""
+    import nachbereiten_modell as nm
+    ab = (today - timedelta(days=tage)).isoformat()
+    gruppen: list[dict] = []
+    for d, k, t in events:
+        if k != "RISK" or d < ab:
+            continue
+        kopf = t.split(":", 1)[0].strip() if ":" in t[:70] else ""
+        kopf = re.sub(r"\s*\([^)]*\)\s*$", "", kopf)             # "Titel (Mail X, 11.09.)" -> "Titel"
+        g = next((g for g in gruppen if (kopf and g["kopf"].casefold() == kopf.casefold())
+                  or (not kopf and not g["kopf"] and nm.aehnlich(g["text"], t))), None)
+        if g is None:
+            gruppen.append({"kopf": kopf, "text": t, "n": 1})
+        else:
+            g["n"] += 1
+    gruppen.sort(key=lambda g: -g["n"])
+    return [(g["kopf"] or _kurz(g["text"], 40), g["n"]) for g in gruppen]
 
 
 def _person_link(value) -> str:
@@ -279,6 +346,11 @@ def render_block(f: dict, prose: str, today: date) -> str:
     if f["questions"]:
         offen += f" · {f['questions']} Frage(n)"
     offen += f" · **Risiken (30 Tage):** {f['risks']}"
+    rg = f.get("risiko_gruppen") or []
+    if rg and len(rg) < sum(n for _, n in rg):
+        # mehrere Zeilen je Risiko: die Gruppen nennen, statt nur zu zaehlen
+        offen += (f" in {len(rg)} Gruppen – " + ", ".join(f"{name} ({n})" if n > 1 else name for name, n in rg[:4])
+                  + (" …" if len(rg) > 4 else ""))
     if f["last_movement"]:
         offen += f" · **Zuletzt bewegt:** {_de(f['last_movement'])}"
     if f.get("altbestand"):
@@ -297,8 +369,9 @@ def render_block(f: dict, prose: str, today: date) -> str:
         if f.get("unterthemen") else "")
     # Wer: von Hand > laut Rolle (Personenseite) > berechnet (aktiv im Thema / darunter)
     people = [f"**Verantwortlich:** {f['verantwortlich']}"] if f.get("verantwortlich") else []
+    kreis = []
     if f.get("rollen"):
-        people.append("**Rollen:** " + ", ".join(f["rollen"]))
+        kreis.append("**Rollen:** " + ", ".join(f["rollen"]))
     who = []
     if f.get("beteiligte"):
         who.append("**Beteiligt:** " + ", ".join(f["beteiligte"][:6]))
@@ -306,12 +379,26 @@ def render_block(f: dict, prose: str, today: date) -> str:
         who.append(("**in Unterthemen:** " if who else "**Beteiligt in Unterthemen:** ")
                    + ", ".join(f["beteiligte_unterthemen"][:6]))
     if who:
-        people.append(" · ".join(who))
+        kreis.append(" · ".join(who))
+    # Stand als Delta: was ist neu, was braucht mich - vor den Zahlen, weil man das zuerst wissen will
+    delta = []
+    if f.get("neu"):
+        delta.append(f"**Neu ({DELTA_TAGE} Tage):** " + " · ".join(f["neu"]))
+    bd = f.get("braucht_dich") or {}
+    if bd.get("anzahl"):
+        delta.append(f"**Braucht dich:** {bd['anzahl']} Punkt(e)"
+                     + (f", {bd['ueberfaellig']} überfällig" if bd.get("ueberfaellig") else "")
+                     + (" – " + " · ".join(bd["punkte"]) if bd.get("punkte") else ""))
+    # Wer beteiligt ist, steht eingeklappt - sieben Zeilen Namen verdecken sonst den Stand
+    anzahl = len(f.get("rollen") or []) + len(f.get("beteiligte") or []) + len(f.get("beteiligte_unterthemen") or [])
+    eingeklappt = ([">", f"> > [!info]- Beteiligte ({anzahl})", *(f"> > {l}" for l in kreis)] if kreis else [])
     lines = [MARK_START, head, *(f"> {l}" for l in prose.splitlines()), ">",
+             *(f"> {l}" for l in delta),
              f"> {offen}", f"> {ampel}", *([f"> {subline}"] if subline else []),
              *(f"> {l}" for l in people),
              "> _Automatisch aus Log und offenen Punkten (`2ndbrain stand`) — "
-             "eigene Notizen außerhalb dieses Blocks._"]
+             "eigene Notizen außerhalb dieses Blocks._",
+             *eingeklappt]
     if f.get("elsewhere"):
         lines += ["", "**Offene Punkte aus Meetings und anderen Themen**", "", TASK_QUERY]
     lines.append(MARK_END)

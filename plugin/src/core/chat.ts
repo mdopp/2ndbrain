@@ -262,6 +262,8 @@ const FRAGT_AUFGABEN = /offen|aufgabe|zusage|überfällig|ueberfaellig|to-?do|na
 const FRAGT_LOG = /risik|beschl|entscheid|verlauf|passiert|bewegt|meilenstein|frist/;
 // Fragen nach einer Terminliste - der Ausschnitt kennt nur Termine mit Notiz, der Kalender fehlt ihm
 const FRAGT_TERMINE = /welche termine|meine termine|termine (habe|hab|gibt|stehen|sind)|wann (ist|sind|habe|hab)|nächste[rn]? termin/;
+// Fragen nach dem eigenen Fokus - die Zahlen dazu stehen in keinem Ausschnitt
+const FRAGT_FOKUS = /fokus|nordstern|priorit|das richtige|die richtigen (dinge|themen|sachen)|wohin (geht|ging|gehen) (meine|die) zeit|worauf (sollte|soll|muss) ich mich/;
 
 /** Zeitraum einer Frage nach Terminen (von, bis) - „nächste Woche“, „diese Woche“, „morgen“ …; null ohne. */
 export function terminFenster(frage: string, today: string): [string, string] | null {
@@ -284,6 +286,7 @@ export function vorabAbfrage(frage: string, w: World, scope: Scope, window: Wind
   const q = frage.toLowerCase();
   const person = scope.personen?.[0] ? w.personName(scope.personen[0]) : "";
   const thema = scope.themen?.[0] ? w.topicName(scope.themen[0]) : "";
+  if (FRAGT_FOKUS.test(q)) return { name: "fokus", args: {} };
   if (w.gekuerzt.has("tasks") && FRAGT_AUFGABEN.test(q) && (person || thema)) {
     return { name: "tasks", args: { ...(person ? { person } : { thema }), ...(/überfällig|ueberfaellig/.test(q) ? { ueberfaellig: true } : {}) } };
   }
@@ -728,6 +731,9 @@ const WERKZEUG_HINWEIS = [
   "- „Welche Risiken/Beschlüsse gab es zu X (seit …)?“ → `log` mit Thema, Art und Zeitraum.",
   "- „Welche Termine habe ich (nächste Woche, zu X, mit Y)?“ → `meetings` mit von/bis als Datum (heute steht oben).",
   "- „Welche Systeme/Themen/Personen haben … (ein Feld, etwa ohne Owner, Ampel rot, Bereich X)?“ → `query`.",
+  "- „Tue ich das Richtige?“, „Wie stehen meine Fokus-Themen/Prioritäten?“, „Wohin geht meine Zeit?“ → `fokus`; "
+    + "ordne ein, was auf den Fokus einzahlt und was fehlt (nächster Schritt, Bewegung, Zeit) – nur mit den Zahlen "
+    + "aus dem Ergebnis.",
   "- Domain Atlas: „Welche Events/Commands/Queries sendet oder empfängt X?“, „Welche Prozesse gibt es in Y?“, "
     + "„Welche Kontexte gehören Team Z?“, „Wie sieht das Domänenmodell von X aus?“ → `atlas` (Art, Typ, Kontext, "
     + "Subdomäne, Team, Reife).",

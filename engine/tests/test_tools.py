@@ -99,7 +99,7 @@ def temp_vault():
               "aufgaben", "ampel",
               "personen", "begriffsindex", "nachbereiten_modell", "nachbereiten", "stand",
               "auto", "verdichten", "systemuebersicht", "kanon_vorschlaege",
-              "einrichten", "kanon", "schreibweisen", "umbenennen", "zusammenfuehren"):
+              "einrichten", "kanon", "schreibweisen", "umbenennen", "zusammenfuehren", "fokus"):
         if m in sys.modules:
             importlib.reload(sys.modules[m])
     return d
@@ -120,7 +120,7 @@ def restore_vault():
               "aufgaben", "ampel",
               "personen", "begriffsindex", "nachbereiten_modell", "nachbereiten", "stand",
               "auto", "verdichten", "systemuebersicht", "kanon_vorschlaege",
-              "einrichten", "kanon", "schreibweisen", "umbenennen", "zusammenfuehren"):
+              "einrichten", "kanon", "schreibweisen", "umbenennen", "zusammenfuehren", "fokus"):
         if m in sys.modules:
             importlib.reload(sys.modules[m])
 
@@ -498,8 +498,11 @@ def t_briefing_shortens_at_word_and_link_boundaries():
     _o, label, _c = bf._split_item(lang)
     ok(label.endswith("…") and "(Ott" not in label and len(label) <= 70, f"Label: {label!r}")
     ok(label.startswith("Vier Jahresziel-Workshops"), label)
-    q = bf.default_question({"kind": "decision", "label": label, "owners": [], "stale": False})
-    ok("„Vier Jahresziel-Workshops" in q and "(Ott" not in q, q)
+    # Seit dem Briefing ohne Schablone (KONZEPT §8, Befund 17.11.2026) wiederholt die Frage das Thema nicht
+    # mehr: ein Beschluss ohne Besonderheit bekommt keine, ein vertagter eine ohne das Label.
+    eq(bf.default_question({"kind": "decision", "label": label, "owners": [], "stale": False}), "")
+    q = bf.default_question({"kind": "decision", "label": label, "owners": [], "stale": False, "times_seen": 3})
+    ok("Zum 3. Mal" in q and "(Ott" not in q, q)
     zelle = bf._cell("Zielbild fehlt; Prioritaet mit Otto klaeren (→ [[2026-09-02---runde---zahlungsabgleich]])", 60)
     ok("[[" not in zelle and zelle.endswith("…"), f"angeschnittener Link: {zelle!r}")
     eq(bf._cell("kurz | knapp", 60), "kurz \\| knapp")
@@ -2195,6 +2198,200 @@ def t_uebernehmen_absender_aus_der_mail():
         hs.apply_project_updates([{"slug": "portal", "events": ["[DECISION] Rollout ab Montag"]}], source_file=str(termin))
         text = thema.read_text(encoding="utf-8")
         ok("[DECISION] Go im Oktober (→" in text and "[DECISION] Rollout ab Montag (→" in text, text)
+    finally:
+        restore_vault()
+
+
+def t_auto_letzter_lauf_mit_meldungen():
+    """Ein voller Lauf landet mit allen Meldungen in auto_letzter_lauf.json: ein gescheitertes Unterprogramm
+    (Kalender ohne Adresse) mit seiner ganzen Meldung statt der letzten Zeile des Hilfetexts, ein Absturz mit
+    der Stelle im Code. Ein Teil-Lauf (--only, Nachbereiten) ueberschreibt ihn nicht."""
+    d = temp_vault()
+    alt = os.environ.pop("VAULT_CALENDAR_URL", None)
+    try:
+        import auto
+        importlib.reload(auto)
+        auto.ORDER = ("kalender", "personen")
+        auto.STEPS["personen"] = lambda ctx: 1 / 0
+        r = auto.run(llm_status=(False, "aus"), force=True)
+        datei = d / ".2ndbrain" / "daten" / "auto_letzter_lauf.json"
+        lauf = json.loads(datei.read_text(encoding="utf-8"))
+        eq((lauf["ok"], [s["step"] for s in lauf["steps"]], bool(lauf.get("am"))), (False, ["kalender", "personen"], True),
+           "Lauf:")
+        kal = lauf["steps"][0]["detail"]
+        ok(kal.startswith("ERROR: keine Kalender-Adresse") and "Einstellungen -> Kalender" in kal, kal)
+        tb = lauf["steps"][1].get("traceback") or ""
+        ok("ZeroDivisionError" in tb and "line " in tb, tb)
+        eq(r["steps"][1]["detail"], "ZeroDivisionError: division by zero", "Meldung:")
+        auto.run(only={"kalender"}, llm_status=(False, "aus"), force=True)
+        # die Schritte, nicht die Zeit: beide Laeufe koennen in derselben Sekunde liegen
+        eq([s["step"] for s in json.loads(datei.read_text(encoding="utf-8"))["steps"]], ["kalender", "personen"],
+           "Teil-Lauf hat ueberschrieben:")
+    finally:
+        if alt is not None:
+            os.environ["VAULT_CALENDAR_URL"] = alt
+        restore_vault()
+        import auto
+        importlib.reload(auto)
+
+
+def t_kalender_dauer_der_termine():
+    """Der Kalender kennt die Dauer: DTEND (Zeitzone, UTC) oder DURATION; bei Serien je Termin die der Serie,
+    beim verschobenen Einzeltermin seine eigene; ganztaegig, ohne Ende oder verdreht keine. events.json traegt
+    sie (`dauer_min`), die Vorbereitung liest sie mit."""
+    ical, west = _west_local()
+    import kalender as ec
+    importlib.reload(ec)
+    W = "W. Europe Standard Time"
+    kal = _kal(_VTZ_WEST,
+               f"BEGIN:VEVENT\nUID:s-1\nSUMMARY:Jourfix Nord\nDTSTART;TZID={W}:20260907T090000\n"
+               f"DTEND;TZID={W}:20260907T093000\nRRULE:FREQ=WEEKLY;COUNT=3;BYDAY=MO\nEND:VEVENT\n",
+               f"BEGIN:VEVENT\nUID:s-1\nRECURRENCE-ID;TZID={W}:20260914T090000\nSUMMARY:Jourfix Nord\n"
+               f"DTSTART;TZID={W}:20260914T110000\nDTEND;TZID={W}:20260914T120000\nEND:VEVENT\n",
+               "BEGIN:VEVENT\nUID:e-1\nSUMMARY:Workshop\nDTSTART:20260915T120000Z\nDTEND:20260915T150000Z\nEND:VEVENT\n",
+               f"BEGIN:VEVENT\nUID:e-2\nSUMMARY:Kurz\nDTSTART;TZID={W}:20260916T100000\nDURATION:PT45M\nEND:VEVENT\n",
+               f"BEGIN:VEVENT\nUID:e-3\nSUMMARY:Offen\nDTSTART;TZID={W}:20260917T100000\nEND:VEVENT\n",
+               "BEGIN:VEVENT\nUID:e-4\nSUMMARY:Feiertag\nDTSTART;VALUE=DATE:20261003\nDTEND;VALUE=DATE:20261004\nEND:VEVENT\n",
+               "BEGIN:VEVENT\nUID:e-5\nSUMMARY:Verdreht\nDTSTART:20260918T100000Z\nDTEND:20260918T090000Z\nEND:VEVENT\n")
+    evs = ec.parse_events(kal, "2026-09-01", "2026-10-31", own_emails=set(), local=west)
+    eq(sorted((e["date"], e["summary"], e["dauer_min"]) for e in evs),
+       [("20260907T090000", "Jourfix Nord", 30), ("20260914T110000", "Jourfix Nord", 60),
+        ("20260915T140000", "Workshop", 180), ("20260916T100000", "Kurz", 45), ("20260917T100000", "Offen", None),
+        ("20260918T120000", "Verdreht", None), ("20260921T090000", "Jourfix Nord", 30), ("20261003", "Feiertag", None)],
+       "Dauer:")
+    eq([ical.duration(x) for x in ("PT1H30M", "P1D", "P1W", "P1DT2H", "PT", "x")],
+       [timedelta(minutes=90), timedelta(days=1), timedelta(weeks=1), timedelta(hours=26), None, None], "DURATION:")
+    d = temp_vault()
+    try:
+        import vault_paths as vp
+        import vorbereiten
+        cal = vp.SOURCES_DIR / "calendar"
+        cal.mkdir(parents=True)
+        cal.joinpath("events.json").write_text(json.dumps([
+            {"date_iso": "2026-09-30", "time": "10:00", "summary": "Review Portal", "dauer_min": 90},
+            {"date_iso": "2026-09-30", "time": "12:00", "summary": "Alt ohne Dauer"}]), encoding="utf-8", newline="\n")
+        eq([(e["title"], e["dauer_min"]) for e in vorbereiten.load_calendar_events({"2026-09-30"})],
+           [("Review Portal", 90), ("Alt ohne Dauer", None)], "events.json:")
+    finally:
+        restore_vault()
+
+
+def t_fokus_themen_fakten_und_spiegel():
+    """Fokus ist ein Rang am Thema; ein Dach zaehlt seine Unterthemen mit (Nordstern). Die Zahlen fuer den
+    Spiegel rechnet der Code: naechster eigener Schritt (keine Fragen), Bewegung im Log, Termine mit Dauer aus
+    dem Kalender, Zeit nach Fokus / anderen Themen / ohne Thema, die Woche voraus, Warnungen. Das Modell ordnet
+    nur ein - nennt es ein Datum, das in keinem Fakt steht, wird seine Einordnung verworfen. Der Spiegel
+    entsteht einmal je Woche; ohne Modell mit den Zahlen allein, mit Modell spaeter neu. Die Vorbereitung eines
+    Termins zum Fokus bekommt Ziel und naechsten Schritt."""
+    d = temp_vault()
+    try:
+        import vault_paths as vp
+        import fokus as fk
+        importlib.reload(fk)
+        eq([fk.rang(x) for x in (1, "2", True, False, 0, "ja", "x", None)],
+           [1, 2, fk.RANG_OHNE_NUMMER, None, None, fk.RANG_OHNE_NUMMER, None, None], "Rang:")
+        (d / ".2ndbrain" / "local.config.json").write_text('{"ich": "ich-selbst"}', encoding="utf-8", newline="\n")
+        (d / "entities" / "people" / "ich-selbst.md").write_text("---\ntype: person\nname: Ich Selbst\n---\n",
+                                                                 encoding="utf-8", newline="\n")
+        P = d / "entities" / "projects"
+        w = lambda p, s: p.write_text(s, encoding="utf-8", newline="\n")
+        w(P / "portal.md", "---\ntype: project\ntitle: Portal\nkind: area\nfokus: 1\nziel: Neues Portal live\n"
+                           "target_date: '2026-11-30'\nhealth: yellow\nzuletzt_bewegt: '2026-10-02'\n"
+                           "naechster_termin: '2026-10-08'\n---\n# Portal\n\n## Event Log\n"
+                           "- [2026-10-02] [DECISION] Go-live im November\n- [2026-09-01] [STATUS] Alter Stand\n")
+        ich = "[[ich-selbst|Ich Selbst]]"
+        w(P / "portal-suche.md", "---\ntype: project\ntitle: Portal Suche\nparent: '[[portal]]'\n---\n# Suche\n\n"
+                                 "## Offene Punkte\n"
+                                 f"- [ ] Suchindex freigeben — {ich} · [[portal-suche|Portal Suche]] 📅 2026-10-09 ➕ 2026-10-01\n"
+                                 f"- [ ] Altes aufräumen — {ich} · [[portal-suche|Portal Suche]] ➕ 2026-09-01\n"
+                                 f"- [ ] ❓ Kommt das Budget? — an {ich} · [[portal-suche|Portal Suche]] 📅 2026-10-07\n"
+                                 f"- [x] Konzept abgestimmt — {ich} ➕ 2026-09-20 ✅ 2026-10-01\n\n"
+                                 "## Event Log\n- [2026-10-03] [MILESTONE] Suche im Test\n")
+        w(P / "daten.md", "---\ntype: project\ntitle: Datenplattform\nfokus: 2\nzuletzt_bewegt: '2026-09-01'\n---\n# Daten\n")
+        w(P / "betrieb.md", "---\ntype: project\ntitle: Betrieb\n---\n# Betrieb\n")
+        A = d / "active-meetings" / "2026" / "10"
+        A.mkdir(parents=True)
+        R = vp.MEETINGS_DIR / "2026-09"
+        R.mkdir(parents=True)
+
+        def note(p, title, day, time, themen, uid=""):
+            w(p, f"---\ntype: meeting\ntitle: {title}\ndate: '{day}'\nmeeting_time: '{time}'\n"
+                 + (f"themen: [{themen}]\n" if themen else "") + (f"outlook_uid: {uid}\n" if uid else "") + "---\n")
+        note(R / "a.md", "Review Suche", "2026-09-30", "10:00", "portal-suche", "u-1")     # archiviert, ueber UID
+        note(A / "b.md", "Portal Weekly", "2026-10-05", "09:00", "portal")
+        note(A / "c.md", "Betrieb Runde", "2026-10-02", "14:00", "betrieb")
+        note(A / "e.md", "Kaffee", "2026-10-01", "08:00", "")
+        note(A / "f.md", "Portal Planung", "2026-10-07", "10:00", "portal")                 # kommt noch
+        cal = vp.SOURCES_DIR / "calendar"
+        cal.mkdir(parents=True)
+        cal.joinpath("events.json").write_text(json.dumps([
+            {"date_iso": "2026-09-30", "time": "10:00", "summary": "Review Suche", "outlook_uid": "u-1", "dauer_min": 90},
+            {"date_iso": "2026-10-05", "time": "09:00", "summary": "Portal Weekly", "dauer_min": 30},
+            {"date_iso": "2026-10-02", "time": "14:00", "summary": "Betrieb Runde", "dauer_min": 60},
+            {"date_iso": "2026-10-01", "time": "08:00", "summary": "Kaffee", "dauer_min": 30},
+            {"date_iso": "2026-10-07", "time": "10:00", "summary": "Portal Planung", "dauer_min": 60},
+            {"date_iso": "2026-10-08", "time": "13:00", "summary": "Budgetrunde", "dauer_min": 120}]),
+            encoding="utf-8", newline="\n")
+
+        heute = date(2026, 10, 6)
+        ft = fk.themen()
+        eq([(f["slug"], f["rang"], sorted(f["menge"])) for f in ft],
+           [("portal", 1, ["portal", "portal-suche"]), ("daten", 2, ["daten"])], "Fokus:")
+        f = fk.fakten(heute)
+        p, dp = f["themen"]
+        eq(p["naechster_schritt"], {"text": "Suchindex freigeben", "faellig": "2026-10-09"},
+           "naechster Schritt (Unterthema zaehlt mit, Frage nicht):")
+        eq((p["offen"], p["ueberfaellig"], p["erledigt"]), (2, 0, ["Konzept abgestimmt"]), "Schritte:")
+        eq([e["text"] for e in p["bewegung"]], ["Suche im Test", "Go-live im November"], "Bewegung (7 Tage):")
+        eq(p["termine"], {"anzahl": 2, "minuten": 120}, "Termine mit Dauer (UID, Zeit+Titel):")
+        eq([k["titel"] for k in p["kommende"]], ["Portal Planung"], "voraus:")
+        eq(p["warnungen"], [], "Portal ohne Warnung:")
+        eq(dp["warnungen"], ["kein nächster Schritt", "seit 35 Tagen keine Bewegung",
+                             "kein Termin in den nächsten 14 Tagen", "kein Ziel formuliert"], "Datenplattform:")
+        eq({k: f["zeit"][k] for k in ("fokus", "andere", "ohne")},
+           {"fokus": {"anzahl": 2, "minuten": 120}, "andere": {"anzahl": 1, "minuten": 60},
+            "ohne": {"anzahl": 1, "minuten": 30}}, "Zeit:")
+        eq(fk.anteile(f["zeit"]), {"fokus": 57, "andere": 29, "ohne": 14}, "Anteile nach Minuten:")
+        eq([t["titel"] for t in f["vorschau"]["ohne_fokus"]], ["Budgetrunde"], "Woche ohne Fokus:")
+
+        calls = []
+
+        def llm(messages, schema, **kw):
+            calls.append(messages[1]["content"])
+            return ({"ueberblick": "Mehr als die Hälfte deiner Termine zahlte auf das Portal ein; die Datenplattform "
+                                   "lag still.",
+                     "frage_woche": "Welche Runde ohne Fokus-Bezug kannst du abgeben?",
+                     "themen": [{"slug": "portal", "einordnung": "Das Portal bewegt sich: Suche im Test, Go-live beschlossen.",
+                                 "frage": "Wer gibt den Suchindex frei?"},
+                                {"slug": "fremd", "einordnung": "Ein Thema, das es nicht gibt.", "frage": "Was soll das?"}]}, [])
+        r = fk.spiegel(heute, llm_call=llm)
+        eq((r["ok"], r["modell"]), (True, True), "Spiegel mit Einordnung:")
+        text = fk.SPIEGEL.read_text(encoding="utf-8")
+        ok("woche: 2026-W41" in text and "mit_modell: true" in text, text[:200])
+        ok("## 1 · [[portal|Portal]] 🟡" in text and "**Frage:** Wer gibt den Suchindex frei?" in text
+           and "Was soll das?" not in text, text)
+        ok("57 % Fokus · 29 % andere Themen · 14 % ohne Thema (3,5 h in 4 Terminen)" in text, text)
+        ok("- 08.10. 13:00 Budgetrunde" in text, text)
+        eq(fk.spiegel(heute, llm_call=llm)["detail"], "KW 41 schon da", "zweiter Lauf:")
+        eq(len(calls), 1, "Modell nur einmal:")
+        fk.SPIEGEL.unlink()                          # Testdatei im Temp-Vault
+        r = fk.spiegel(heute)
+        ok(r["modell"] is False and "mit_modell: false" in fk.SPIEGEL.read_text(encoding="utf-8"), r)
+        eq(fk.spiegel(heute)["detail"], "KW 41 ohne Einordnung – wartet auf das Modell", "ohne Modell:")
+        erfunden = lambda m, s, **kw: ({"ueberblick": "Am 2026-12-24 ist alles fertig, sagt der Plan, und das passt.",
+                                        "frage_woche": "", "themen": []}, [])
+        ok(fk.spiegel(heute, llm_call=erfunden)["modell"] is False, "erfundenes Datum verworfen")
+        ok(fk.spiegel(heute, llm_call=llm)["modell"] is True, "mit Modell neu")
+
+        tasks = fk.tk.scan()
+        eq(fk.prep_zeilen(["portal-suche", "betrieb"], ft, tasks, "ich-selbst"),
+           ["**★ Fokus 1 · [[portal|Portal]]** · Ziel: Neues Portal live (bis 30.11.2026) · nächster Schritt: "
+            "Suchindex freigeben (fällig 09.10.)", "_Was soll dieser Termin dafür bringen? Oben unter „Ziel“ festhalten._"],
+           "Vorbereitung:")
+        eq(fk.prep_zeilen(["betrieb"], ft, tasks, "ich-selbst"), [], "kein Fokus, keine Zeile:")
+        import auto
+        importlib.reload(auto)
+        ok(auto.ORDER.index("stand") < auto.ORDER.index("fokus") and auto.STEPS["fokus"] is auto.step_fokus, "Schritt")
     finally:
         restore_vault()
 
@@ -6364,6 +6561,11 @@ TESTS = [
     ("Nachbereiten: Termin in Arbeit waehrend des Modells, Aenderung in der Zeit wird nicht ueberschrieben",
      t_nachbereiten_in_arbeit_und_waehrenddessen_geaendert),
     ("Stand: ein Haken waehrend des Modells bleibt stehen", t_stand_haken_waehrend_des_modells_bleibt),
+    ("Automatik: letzter Lauf mit ganzen Meldungen und Stelle im Code, Teil-Lauf ueberschreibt nicht",
+     t_auto_letzter_lauf_mit_meldungen),
+    ("Kalender: Dauer je Termin (DTEND, DURATION, Serie, verschoben), events.json", t_kalender_dauer_der_termine),
+    ("Fokus: Rang, Nordstern, naechster Schritt, Zeit, Warnungen, Spiegel (Modell nur Einordnung), Vorbereitung",
+     t_fokus_themen_fakten_und_spiegel),
     ("Adressen: Personen als Verweise (Adresse, Name, Nachname-Komma), Verteiler, gleiche Namen, Rundmail",
      t_adressen_personen_verteiler_rundmail),
     ("Mail-Notiz: alle Empfaenger (nicht mehr bei 400 Zeichen abgeschnitten), gueltiges YAML",

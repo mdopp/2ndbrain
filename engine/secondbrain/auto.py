@@ -27,6 +27,8 @@ geaendert hat; teure Schritte haben ein Mindestintervall (.2ndbrain/daten/.auto_
   verdichten Erledigtes + altes Log ins Themen-Archiv (monatl.) LLM je Quartal
             (erster Lauf nur Vorschau, verdichtet 30 Tage danach)
   stand     Stand-Bloecke + Radar (Prosa nur bei Aenderung)  LLM, sonst nur Fakten
+  fokus     Fokus-Spiegel (reports/fokus-spiegel.md), einmal je Woche ab Montag  LLM, sonst nur
+            Zahlen (mit Modell spaeter in der Woche neu; fokus.py)
   systemuebersicht  LikeC4-Modell + Bericht aus den System-Seiten (taeglich,
             ohne likec4-Pruefung; geschrieben nur bei Aenderung)  deterministisch
   personen  Personen-Ueberblick (taeglich)                   deterministisch
@@ -36,6 +38,9 @@ Zwei Regeln:
     (Ein Sammelpaket ohne Quelle truege im Log das heutige Datum und keinen Quellen-Link.)
   - Ohne Modell laeuft `nachbereiten` NICHT mit der Notloesung: die setzt den
     Fingerabdruck, und die Nachbereitung durch das Modell kaeme nie mehr. Der Schritt wartet.
+
+Jeder volle Lauf landet mit allen Meldungen in .2ndbrain/daten/auto_letzter_lauf.json (scheitert ein Schritt
+unerwartet, mit der Stelle im Code) - das Plugin zeigt es hinter "mit Fehlern".
 
 Sperre: .2ndbrain/daten/.auto.lock verhindert parallele Laeufe (Plugin + Aufgabenplanung). Das Plugin
 schreibt waehrenddessen weiter - nur nicht den Termin, den die Nachbereitung gerade haelt
@@ -52,6 +57,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 
@@ -66,12 +72,12 @@ LOCK_MAX_AGE_S = 30 * 60
 INTERVAL_MIN = {"kalender": 360, "mails": 0, "protokolle": 0, "einarbeiten": 0, "wissen": 0, "vorbereiten": 60,
                 "nachbereiten": 0, "themenlog": 0,
                 "rueckfragen": 0, "schreibweisen": 0, "altbestand": 0, "archivieren": 0, "verdichten": 43200, "stand": 0,
-                "systemuebersicht": 1440, "personen": 1440}
+                "fokus": 60, "systemuebersicht": 1440, "personen": 1440}
 ORDER = ("kalender", "mails", "nachziehen", "protokolle", "einarbeiten", "wissen", "vorbereiten", "nachbereiten",
          "themenlog", "rueckfragen",
          "schreibweisen", "altbestand", "archivieren",
          "verdichten",
-         "stand", "systemuebersicht", "personen")
+         "stand", "fokus", "systemuebersicht", "personen")
 
 
 # --------------------------------------------------------------- Sperre, Zustand
@@ -382,9 +388,27 @@ def step_stand(ctx: dict) -> dict:
         import modell
         llm_call = modell.complete_json
     reports = stand.run(dry_run=ctx["dry_run"], llm_call=llm_call)
-    return {"ok": True, "changed": sum(1 for r in reports if r["changed"]),
-            "detail": f"{sum(1 for r in reports if r['llm'])} Stand-Text(e) neu"
-                      + ("" if llm_call else " (ohne Modell: nur Fakten)")}
+    detail = (f"{sum(1 for r in reports if r['llm'])} Stand-Text(e) neu"
+              + ("" if llm_call else " (ohne Modell: nur Fakten)"))
+    # Das Lagebild dazu (reports/lagebild.md: Zusagen, Radar, Ablaeufe) - es rechnet aus demselben Stand
+    try:
+        import lagebild
+        if lagebild.run(dry_run=ctx["dry_run"])["geaendert"]:
+            detail += ", Lagebild neu"
+    except Exception as e:                           # noqa: BLE001 - das Bild haelt den Schritt nicht auf
+        detail += f", Lagebild nicht geschrieben ({type(e).__name__}: {e})"
+    return {"ok": True, "changed": sum(1 for r in reports if r["changed"]), "detail": detail}
+
+
+def step_fokus(ctx: dict) -> dict:
+    """Einmal je Woche (der erste Lauf ab Montag): Fokus-Spiegel. Ohne Modell mit den Zahlen allein -
+    kommt das Modell spaeter in der Woche, wird er mit Einordnung neu geschrieben."""
+    import fokus
+    llm_call = None
+    if ctx["llm_ok"]:
+        import modell
+        llm_call = modell.complete_json
+    return fokus.spiegel(llm_call=llm_call, dry_run=ctx["dry_run"])
 
 
 def step_systemuebersicht(ctx: dict) -> dict:
@@ -404,14 +428,22 @@ def step_systemuebersicht(ctx: dict) -> dict:
 def step_personen(ctx: dict) -> dict:
     import personen
     r = personen.run(dry_run=ctx["dry_run"])
-    return {"ok": True, "detail": f"{r.get('written', 0)} Person(en) aktualisiert"}
+    detail = f"{r.get('written', 0)} Person(en) aktualisiert"
+    # Die Organisation dazu: reports/orgchart.md (eigene Linie mit offenen Zusagen, Pflegeliste)
+    try:
+        import organisation
+        o = organisation.run(dry_run=ctx["dry_run"])
+        detail += f", Organisation: {o['mit_linie']} von {o['personen']} mit Berichtslinie"
+    except Exception as e:                           # noqa: BLE001 - der Bericht haelt den Schritt nicht auf
+        detail += f", Organisation nicht geschrieben ({type(e).__name__}: {e})"
+    return {"ok": True, "detail": detail}
 
 
 STEPS = {"kalender": step_kalender, "mails": step_mails, "nachziehen": step_nachziehen, "protokolle": step_protokolle,
          "einarbeiten": step_einarbeiten, "wissen": step_wissen, "vorbereiten": step_vorbereiten,
          "nachbereiten": step_nachbereiten, "themenlog": step_themenlog, "rueckfragen": step_rueckfragen, "schreibweisen": step_schreibweisen,
          "altbestand": step_altbestand, "archivieren": step_archivieren, "verdichten": step_verdichten,
-         "stand": step_stand, "systemuebersicht": step_systemuebersicht,
+         "stand": step_stand, "fokus": step_fokus, "systemuebersicht": step_systemuebersicht,
          "personen": step_personen}
 
 
@@ -443,17 +475,56 @@ def run(*, only: set[str] | None = None, dry_run: bool = False, force: bool = Fa
                 with contextlib.redirect_stdout(sys.stderr):
                     res = STEPS[name](ctx)
             except Exception as e:           # ein Schritt darf die Kette nicht kippen
-                res = {"ok": False, "detail": f"{type(e).__name__}: {e}"}
+                # die Stelle im Code dazu - sonst steht in "mit Fehlern" nur "KeyError: 'x'"
+                res = {"ok": False, "detail": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-2000:]}
+            # Eine Lease fuer ein groesseres Modell kostet den Haushalt etwas - sie ueberlebt den
+            # Schritt nicht, der sie brauchte (modell.lease_anfordern).
+            try:
+                import modell
+                if modell.lease_freigeben():
+                    res["detail"] = (str(res.get("detail") or "") + " · Modell-Lease zurückgegeben").strip(" ·")
+            except Exception:                # noqa: BLE001 - die Rueckgabe darf keinen Schritt kippen
+                pass
             res.update(step=name, seconds=round(time.time() - t0, 1))
             steps.append(res)
             if res.get("ok") and not res.get("skipped") and not dry_run:
                 state[name] = started
         if not dry_run:
             save_state(state)
-        return {"ok": all(s.get("ok") for s in steps), "llm": llm_status[0],
-                "seconds": round(time.time() - started, 1), "steps": steps}
+        result = {"ok": all(s.get("ok") for s in steps), "llm": llm_status[0],
+                  "seconds": round(time.time() - started, 1), "steps": steps}
+        if not llm_status[0]:
+            # Ohne Modell laufen die Schritte weiter (nur Fakten, Notbehelf) - das Plugin zeigt,
+            # warum es fehlt und was zu tun ist (modell.fehler_einordnen).
+            import modell
+            info = modell.fehler_einordnen(llm_status[1])
+            result["llm_fehler"] = {k: info[k] for k in ("art", "ursache", "ausweg", "erlaubt", "meldung")}
+        else:
+            import modell
+            z = modell.zuletzt()
+            if z.get("ersatz_fuer"):
+                result["llm_ersatz"] = {"model": z["model"], "ersatz_fuer": z["ersatz_fuer"]}
+        if not dry_run and only is None and note is None:
+            letzten_lauf_merken(result)
+        return result
     finally:
         release_lock()
+
+
+def letzter_lauf_datei() -> Path:
+    return vp.DATA_DIR / "auto_letzter_lauf.json"
+
+
+def letzten_lauf_merken(result: dict) -> None:
+    """Das Ergebnis eines vollen Laufs mit allen Meldungen - das Plugin zeigt es hinter "mit Fehlern", auch
+    nach einem Neustart und fuer Laeufe aus der Aufgabenplanung."""
+    try:
+        f = letzter_lauf_datei()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"am": datetime.now().isoformat(timespec="seconds"), **result}, ensure_ascii=False,
+                                indent=1), encoding="utf-8", newline="\n")
+    except OSError as e:                     # der Lauf selbst ist gelungen oder gescheitert - nicht deswegen
+        print(f"[WARN] letzter Lauf nicht gespeichert ({type(e).__name__}: {e})", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -51,6 +51,11 @@ export interface TopicInfo {
   altbestand: number;
   nextMeeting: string;     // naechster_termin (YYYY-MM-DD) oder ""
   inherited?: boolean;     // ampel_geerbt: Oberthema, Ampel nur von Unterthemen
+  parent?: string;         // Oberthema (Slug)
+  fokus?: number | null;   // Rang als Fokus-Thema (`fokus:`, core/fokus.ts), null = kein Fokus
+  ziel?: string;           // `ziel:` - woran merke ich, dass es geschafft ist
+  zieltermin?: string;     // `target_date` (YYYY-MM-DD) oder ""
+  zuletztBewegt?: string;  // zuletzt_bewegt (stand.py)
 }
 
 export type MeetingPhase =

@@ -1,6 +1,12 @@
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { nachziehenText } from "../core/inarbeit";
+import { zeitText } from "../core/automatik";
+import { addDays } from "../core/datum";
+import {
+  FOKUS_HOECHSTENS, FokusThema, FokusZeile, RANG_OHNE_NUMMER, SPIEGEL, TerminZeit, ZEIT_TAGE, fokusFuer, fokusThemen,
+  fokusVon, fokusZeilen, stunden, zeitVerteilung, zeitZeile,
+} from "../core/fokus";
 import type { TopicTarget } from "./themen";
 import {
   MeetingInfo, PHASE_LABEL, TaskInfo, TopicInfo, dayLabel, daysBetween, followUps, healthEmoji,
@@ -44,13 +50,18 @@ export class TodayView extends ItemView {
     const meetings = await this.plugin.index.meetings(today);
     const topics = this.plugin.index.topics();
     const bySlug = new Map(topics.map((t) => [t.slug, t]));
+    const fokus = fokusThemen(topics, today);
+    const zu = fokusVon(fokus);
+    const termine = fokus.length ? await this.plugin.termineMitDauer(addDays(today, -ZEIT_TAGE), addDays(today, -1)) : [];
 
+    root.empty();                                  // nach dem Lesen: zwei schnelle Aufrufe zeichnen nicht doppelt
     this.renderHeader(root, today);
     this.renderJobs(root);
+    this.renderFokus(root, fokus, termine, today);
     this.renderMissing(root, meetings, today);
     this.renderRadar(root, topics);
-    this.renderMine(root, today);
-    this.renderMeetings(root, meetings, today, bySlug);
+    this.renderMine(root, today, zu);
+    this.renderMeetings(root, meetings, today, bySlug, zu);
     this.renderBacklog(root, meetings, today);
   }
 
@@ -108,9 +119,17 @@ export class TodayView extends ItemView {
     status.createSpan({ cls: `sb-dot ${llm.ok ? "sb-ok" : "sb-off"}` });
     status.createSpan({ text: llm.ok ? "Modell bereit" : `Modell aus (${llm.detail})` });
     const last = this.plugin.lastAuto;
-    if (last) {
-      const hh = last.at.toTimeString().slice(0, 5);
-      status.createSpan({ text: ` · Automatik ${hh}${last.result?.ok === false ? " mit Fehlern" : ""}` });
+    if (last) {                                   // Klick: der letzte Lauf mit allen Schritten und Meldungen
+      const fehler = !last.result ? "ohne Ergebnis" : last.result.ok === false ? "mit Fehlern" : "";
+      status.appendText(" · ");
+      const a = status.createEl("a", { cls: "sb-auto-link", href: "#",
+                                       attr: { "aria-label": "Letzter Lauf: Schritte, Meldungen, was zu tun ist" } });
+      a.appendText(`Automatik ${zeitText(last.at)}`);
+      if (fehler) a.createSpan({ cls: "sb-fehler", text: ` ${fehler}` });
+      a.onclick = (e) => {
+        e.preventDefault();
+        void this.plugin.openAutomatikBericht();
+      };
     }
     if (this.plugin.nachziehen.length) {          // nach einem Update: alte Notizen im Hintergrund
       status.createSpan({ text: ` · Nachziehen: ${nachziehenText(this.plugin.nachziehen)} offen`,
@@ -150,6 +169,70 @@ export class TodayView extends ItemView {
     }
   }
 
+  // ---------------------------------------------------------------- Fokus
+
+  /** Die eigenen Fokus-Themen ganz oben (core/fokus.ts): je Thema Ziel, naechster Schritt, Termine und Zeit,
+   *  Warnungen; darunter, wohin die Zeit der letzten Tage ging. */
+  private renderFokus(root: HTMLElement, fokus: FokusThema[], termine: TerminZeit[], today: string): void {
+    const zeilen = fokusZeilen(fokus, this.plugin.tasks, termine, this.plugin.selfSlug, today);
+    const warn = zeilen.filter((z) => z.warnungen.length).length;
+    const { sum, body } = this.section(root, "fokus", "Fokus");
+    if (fokus.length) {
+      sum.createSpan({ cls: `sb-summary-meta${warn ? " sb-alert" : ""}`,
+                       text: `${fokus.length}${warn ? ` · ${warn} mit ⚠` : ""}` });
+    }
+    this.headButton(sum, "Planen", () => this.plugin.openFokus());
+    if (this.app.vault.getAbstractFileByPath(SPIEGEL)) this.headButton(sum, "Spiegel", () => void this.plugin.openSpiegel());
+    if (!fokus.length) {
+      body.createDiv({ cls: "sb-muted", text: "Noch keine Fokus-Themen. Wähle die drei bis fünf, die du wirklich "
+        + "voranbringen willst – mit Ziel und nächstem Schritt („Planen“)." });
+      return;
+    }
+    for (const z of zeilen) this.renderFokusZeile(body, z, today);
+    const zeit = zeitVerteilung(termine, fokusVon(fokus));
+    body.createDiv({ cls: "sb-fokus-zeit", text: `Deine Zeit, letzte ${ZEIT_TAGE} Tage: ${zeitZeile(zeit)}`,
+                     attr: { title: "Termine mit Notiz; ohne Thema zählt nicht als Fokus. Dauer aus dem Kalender." } });
+    if (fokus.length > FOKUS_HOECHSTENS) {
+      body.createDiv({ cls: "sb-hint sb-fehler", text: `${fokus.length} Fokus-Themen – mehr als ${FOKUS_HOECHSTENS} ist kein Fokus mehr.` });
+    }
+  }
+
+  private renderFokusZeile(parent: HTMLElement, z: FokusZeile, today: string): void {
+    const f = z.fokus;
+    const card = parent.createDiv({ cls: "sb-fokus-zeile" });
+    const top = card.createDiv({ cls: "sb-line" });
+    top.createSpan({ cls: "sb-fokus-rang", text: f.rang < RANG_OHNE_NUMMER ? String(f.rang) : "★" });
+    top.createSpan({ cls: "sb-health", text: healthEmoji(f.health) });
+    this.link(top, f.path, f.titel, "sb-name");
+    if (f.zieltermin) {
+      const rest = z.tageBisZiel ?? 0;
+      top.createSpan({ cls: `sb-muted sb-grow${rest < 0 ? " sb-fehler" : ""}`,
+                       text: rest < 0 ? "Zieltermin überschritten" : `Ziel ${dayLabel(f.zieltermin, today)} · noch ${rest} T` });
+    }
+    if (f.ziel) card.createDiv({ cls: "sb-fokus-ziel sb-muted", text: f.ziel, attr: { title: f.ziel } });
+    const schritt = z.schritt.schritt;
+    if (schritt) {
+      const late = !!schritt.due && schritt.due < today;
+      const row = card.createDiv({ cls: `sb-fokus-schritt sb-link${late ? " sb-overdue" : ""}`,
+                                   attr: { title: schritt.text } });
+      row.setText(`→ ${schritt.text}${schritt.due ? ` · ${late ? "überfällig seit" : "fällig"} ${dayLabel(schritt.due, today)}` : ""}`
+        + (z.schritt.offen > 1 ? ` (+${z.schritt.offen - 1})` : ""));
+      row.onclick = () => { if (schritt.path) void this.plugin.openAt(schritt.path, schritt.line); };
+    }
+    const bits = [`${z.termine.anzahl} Termine${z.termine.minuten ? ` · ${stunden(z.termine.minuten)}` : ""} in ${ZEIT_TAGE} T`];
+    if (f.naechsterTermin) bits.push(`nächster ${dayLabel(f.naechsterTermin, today)}`);
+    if (f.zuletztBewegt) bits.push(`bewegt ${f.zuletztBewegt === today ? "heute" : `vor ${daysBetween(f.zuletztBewegt, today)} T`}`);
+    card.createDiv({ cls: "sb-fokus-meta sb-muted", text: bits.join(" · ") });
+    if (z.warnungen.length) {
+      const w = card.createDiv({ cls: "sb-fokus-warnung" });
+      w.setText(`⚠ ${z.warnungen.join(" · ")}`);
+      if (z.warnungen.some((x) => x.startsWith("kein nächster") || x.startsWith("kein Ziel"))) {
+        const b = w.createEl("button", { text: "Planen", cls: "sb-btn-small" });
+        b.onclick = () => this.plugin.openFokus();
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- Radar
 
   private renderRadar(root: HTMLElement, topics: TopicInfo[]): void {
@@ -174,7 +257,7 @@ export class TodayView extends ItemView {
 
   // ------------------------------------------------------- Meine Aufgaben
 
-  private renderMine(root: HTMLElement, today: string): void {
+  private renderMine(root: HTMLElement, today: string, zu: Map<string, FokusThema>): void {
     const { list, overdue } = myTasks(this.plugin.tasks, this.plugin.selfSlug, today);
     const { sum, body } = this.section(root, "mine", "Meine Aufgaben");
     sum.createSpan({ cls: `sb-summary-meta${overdue ? " sb-alert" : ""}`,
@@ -186,7 +269,7 @@ export class TodayView extends ItemView {
     }
     for (const g of taskBuckets(list, today, MAX_MINE)) {
       body.createDiv({ cls: "sb-group", text: g.label });
-      for (const t of g.tasks) this.renderMyTask(body, t, today);
+      for (const t of g.tasks) this.renderMyTask(body, t, today, fokusFuer(t.topics, zu));
     }
     if (list.length > MAX_MINE) {
       const more = body.createDiv({ cls: "sb-more sb-link", text: `… und ${list.length - MAX_MINE} weitere` });
@@ -194,7 +277,7 @@ export class TodayView extends ItemView {
     }
   }
 
-  private renderMyTask(parent: HTMLElement, t: TaskInfo, today: string): void {
+  private renderMyTask(parent: HTMLElement, t: TaskInfo, today: string, fokus: FokusThema | null = null): void {
     const late = !!t.due && t.due < today;
     const row = parent.createDiv({ cls: `sb-task-row${late ? " sb-overdue" : ""}` });
     const box = row.createEl("input", { type: "checkbox", cls: "task-list-item-checkbox" });
@@ -213,7 +296,7 @@ export class TodayView extends ItemView {
     text.onclick = () => { if (t.path) void this.plugin.openAt(t.path, t.line); };
     const bits: string[] = [];
     const topic = t.topics[0] ? this.plugin.index.topic(t.topics[0])?.title ?? t.topics[0] : "";
-    if (topic) bits.push(topic);
+    if (topic) bits.push(fokus ? `★ ${topic}` : topic);
     if (t.due) bits.push(late ? `seit ${daysBetween(t.due, today)} T überfällig` : `fällig ${dayLabel(t.due, today)}`);
     else if (t.created) bits.push(`seit ${daysBetween(t.created, today)} T offen`);
     main.createDiv({ cls: "sb-task-meta", text: bits.join(" · ") });
@@ -222,28 +305,38 @@ export class TodayView extends ItemView {
   // -------------------------------------------------------------- Termine
 
   private renderMeetings(root: HTMLElement, meetings: MeetingInfo[], today: string,
-                         topics: Map<string, TopicInfo>): void {
+                         topics: Map<string, TopicInfo>, zu: Map<string, FokusThema>): void {
     const todays = meetingsOn(meetings, today).filter((m) => !m.skip);
+    // ★ = zahlt auf einen Fokus ein - die Kopfzeile zaehlt sie
+    const stern = (list: MeetingInfo[]) => {
+      const n = list.filter((m) => fokusFuer(m.topics ?? (m.topic ? [m.topic] : []), zu)).length;
+      return n ? ` · ★ ${n}` : "";
+    };
     if (todays.length) {
       const { sum, body } = this.section(root, "termine-heute", "Termine heute");
-      sum.createSpan({ cls: "sb-summary-meta", text: String(todays.length) });
-      for (const m of todays) this.renderMeeting(body, m, today, topics, true);
+      sum.createSpan({ cls: "sb-summary-meta", text: `${todays.length}${stern(todays)}` });
+      for (const m of todays) this.renderMeeting(body, m, today, topics, true, zu);
     }
     const next = nextMeetingDay(meetings, today);
     if (next) {
       const list = meetingsOn(meetings, next).filter((m) => !m.skip && m.status !== "entfallen");
       const { sum, body } = this.section(root, "termine-naechste", `Termine ${dayLabel(next, today)}`);
-      sum.createSpan({ cls: "sb-summary-meta", text: String(list.length) });
-      for (const m of list) this.renderMeeting(body, m, today, topics, false);
+      sum.createSpan({ cls: "sb-summary-meta", text: `${list.length}${stern(list)}` });
+      for (const m of list) this.renderMeeting(body, m, today, topics, false, zu);
     }
     if (!todays.length && !next) root.createDiv({ cls: "sb-muted sb-pad", text: "Keine Termine in den nächsten Tagen." });
   }
 
   private renderMeeting(parent: HTMLElement, m: MeetingInfo, today: string,
-                        topics: Map<string, TopicInfo>, isToday: boolean): void {
+                        topics: Map<string, TopicInfo>, isToday: boolean, zu: Map<string, FokusThema>): void {
     const card = parent.createDiv({ cls: "sb-meeting" });
     const top = card.createDiv({ cls: "sb-line" });
     top.createSpan({ cls: "sb-time", text: m.time || "–" });
+    const f = fokusFuer(m.topics ?? (m.topic ? [m.topic] : []), zu);
+    if (f) {
+      top.createSpan({ cls: "sb-fokus-stern", text: "★",
+                       attr: { title: `Fokus${f.rang < RANG_OHNE_NUMMER ? ` ${f.rang}` : ""}: ${f.titel}` } });
+    }
     this.link(top, m.path, m.title, "sb-name");
     const phase = meetingPhase(m, today);
     if (m.nachbereiten === "angefordert" && phase !== "nachbereitet") {

@@ -12,7 +12,9 @@ Wer beruflich in viele Themen eingebunden ist – als Führungskraft, Architekti
 
 1. **wissen, wo die eigenen Themen stehen** (Überblick, Bewegung, Ampel),
 2. **in Terminen auskunftsfähig sein** (in Sekunden sagen können, was gilt),
-3. **die richtigen Fragen stellen und Zusagen nachhalten** (wer schuldet wem was, was ist offen).
+3. **die richtigen Fragen stellen und Zusagen nachhalten** (wer schuldet wem was, was ist offen),
+4. **das Wichtigste priorisiert voranbringen** (Fokus-Themen mit Ziel und nächstem Schritt, und immer
+   wieder die Frage: Geht meine Zeit dorthin? → §20).
 
 Termine sind dabei **Eingang** (dort entsteht Wissen) und **Moment der Nutzung** (dort wird es
 gebraucht). Das Wissen selbst gehört zum **Thema**, nicht zum Termin.
@@ -102,6 +104,13 @@ Pfade externer Quellen: Auto-Erkennung (neben dem Vault, `~/code/<repo>`, `~/<re
 - `📅` Frist nur wenn genannt (nie geraten) · `➕` Entstehungsdatum (Datum der Quelle) · `✅` erledigt am.
 - `❓` am Textanfang = Frage. `[x]` erledigt, `[-]` verworfen.
 - Optional `(→ [[quelle]])` am Ende.
+- **Nur Zusagen sind Punkte.** Das Modell gibt jeder Aufgabe eine Art: *Zusage* (eine genannte Person hat es
+  zugesagt oder den Auftrag bekommen), *Absicht* (soll geschehen, niemand hat es übernommen) oder *Info*.
+  Absichten und Infos stehen im Parkplatz der Termin-Notiz („Noch ohne Zusage: …“, „Festgestellt: …“), nicht
+  in den Aufgabenlisten. Dieselbe Zusage in anderen Worten oder als Satzteil wird eine Aufgabe (der längere
+  Text bleibt). Ein Raum oder Ort ist nie verantwortlich.
+- **Beleg.** Unter einem Punkt aus einem Termin steht eingerückt der Satz aus dem Material, aus dem Aufgabe
+  und Person hervorgehen (`    - Beleg: „…“`) – nur, wenn er wörtlich im Material steht.
 - **Wo:** Termin-Notiz `## Actions` (entstanden im Termin) · Themen-Datei `## Offene Punkte`
   (entstanden außerhalb von Terminen). **Nie kopieren** — Themen- und Personenseiten zeigen fremde
   Punkte per Abfrage (abhaken wirkt an der Quelle).
@@ -131,7 +140,9 @@ erzeugt nur, wenn sich der Fingerabdruck (Log + offene Punkte) ändert (`stand_u
 
 ### 4.4 Frontmatter-Ergänzungen
 
-- Themen: `kind`, `parent`, optional `fokus: true`, `atlas_id` (→ 3.3); `stand_updated`, `stand_fingerprint`.
+- Themen: `kind`, `parent`, `atlas_id` (→ 3.3); `stand_updated`, `stand_fingerprint`. Optional als Fokus
+  (→ §20): `fokus` (Rang, 1 = am wichtigsten; `true` zählt hinter allen Nummern), `ziel` (ein Satz: woran
+  merke ich, dass es geschafft ist), `target_date` (Zieltermin, auch für die Ampel).
 - Termine: `themen` (Slugs; das erste ist das Hauptthema), `themen_von_hand` (von Hand zugeordnet,
   wird nicht neu berechnet), `meeting_type` (das Playbook), `teilnehmer` (Personen-Slugs),
   `teilnehmer_unaufgeloest`, `outlook_uid`, `nachbereiten: angefordert` (Vormerkung vom Handy);
@@ -311,6 +322,35 @@ Prüfung kostet einige Minuten je Termin (lädt der Server nur ein Modell zur Ze
 dazu) – vertretbar bei ein, zwei Nachbereitungen pro Stunde. Beide Modelle wählt man in den
 Plugin-Einstellungen aus der Liste des Servers (`/v1/models`).
 
+**Das beste Modell zuerst.** `modelle` in `llm.config.json` ist die Reihe der Modelle, das beste zuerst
+(ohne Liste: `model`, dann `model_pruefung`). Jeder Lauf beginnt beim besten. Lehnt der Server ein Modell
+ab (gesperrt, unbekannt), kommt das nächste der Liste und wird in diesem Lauf nicht noch einmal gefragt;
+ein Modell außerhalb der Liste springt nie ein, auch wenn der Server es anbietet. Welches Modell eingesprungen
+ist, steht im Ergebnis des Laufs (`llm_ersatz`) und an der Termin-Notiz (`modell_ersatz`).
+
+**Gesperrtes Modell anfordern (Lease).** Gibt der Server gerade nur ein Modell frei und lehnt ein anderes mit
+409 ab, fordert die Engine es an und fragt es noch einmal – auch für die Prüfstufe (`modell.lease_anfordern`).
+Sie hält sich an den Lease-Vertrag des Servers (Laib, ADR 0011): Rumpf genau `{model, ttl_s, holder}` mit dem
+Halter `2ndbrain`; lädt das Modell noch (202), fragt sie den Stand ab, statt noch einmal zu senden; solange sie
+die Lease hält, verlängert sie alle `renew_after` Sekunden; eine liegengebliebene eigene Lease gibt sie zuerst
+zurück. Eine Lease kostet den Haushalt etwas (Spracherkennung und Einbettungen ruhen). Deshalb fordert die
+Engine nur an, wenn seit zehn Minuten niemand das Modell gefragt hat (`last_human_at`), gibt nach dem Schritt
+zurück, der sie brauchte (`lease_freigeben` in `auto.py`, sonst am Prozessende), und kennzeichnet ihre eigenen
+Aufrufe als unbeaufsichtigt (`X-Laib-Background`). Hält ein anderer Dienst den Server, steht sein Name und
+das Ende in der Meldung. Dafür
+braucht sie den Modell-Schlüssel des Servers: Er liegt im Obsidian-Schlüsselbund (Einstellungen →
+Modell-Schlüssel), das Plugin reicht ihn je Lauf als `VAULT_LLM_KEY` herein; er steht in keiner Datei und in
+keinem Protokoll. Ohne Schlüssel oder wenn der Server ablehnt, gilt die Reihe der Modelle wie oben; fällt die
+Prüfstufe aus, steht das mit Ursache an der Termin-Notiz (`pruefung_ausgefallen`).
+
+**Störungen mit Ursache und Ausweg.** Jede Störung der Verbindung bekommt eine Art (`modell.fehler_einordnen`:
+kein Server, nicht erreichbar, gesperrt, unbekanntes Modell, Abbruch, Zeitlimit, abgelehnt), eine Ursache in
+einem Satz und einen Ausweg – nie nur „HTTP 409“. Ein Abbruch mitten im Aufruf wird einmal wiederholt. Fehlt
+das Modell, laufen die Schritte ohne es weiter; das Ergebnis des Laufs sagt, warum es fehlte (`llm_fehler`),
+und das Plugin zeigt Ursache, betroffene Schritte und Ausweg im Fenster „Automatik – letzter Lauf“.
+`2ndbrain modell --diagnose` prüft Schritt für Schritt (Adresse, Server, Modell, Antwortformat, Werkzeuge)
+und hält beim ersten Fehler; im Plugin ist das der Knopf „Diagnose starten“.
+
 **Antwortgrenze nach Eingabe.** Prüfstufe und Protokoll bekommen eine Antwortgrenze, die mit dem Material
 wächst: etwa ein Viertel der Eingabezeichen in Tokens, 4096 bis 12288 (`modell.antwort_tokens`) – eine
 feste Grenze schnitt lange Termine ab. Langes Material wird für den Entwurf an Absatz-, Satz- oder
@@ -318,7 +358,7 @@ Wortgrenzen geteilt, nie mitten im Wort.
 
 ## 8. Oberflächen (Obsidian-Plugin)
 
-Heute (ganz oben „Ohne Notizen“, dann Radar, eigene Aufgaben, Termine mit Phase, Nachfassen) ·
+Heute (ganz oben der Fokus (§20) und „Ohne Notizen“, dann Radar, eigene Aufgaben, Termine mit Phase, Nachfassen) ·
 Anleitung für Benutzer (ins Plugin eingebaut, `plugin/anleitung.md`, eigene Ansicht; „?“ in Heute und
 oben in den Einstellungen) · Cockpit-Seiten über Codeblöcke
 (```` ```2ndbrain aufgaben ```` / `risiken`, ohne JavaScript in der Notiz) · Sofortsuche (Stand und
@@ -592,6 +632,19 @@ ist – bei „Speichern und nachbereiten“ mit neuer Nachbereitung; gibt es de
 Notizen als „Nachtrag“ in `inbox/`. Die übrigen Schritte der Automatik lesen und schreiben eine Notiz in
 Millisekunden – wie das Tippen im Editor.
 
+**Fehler der Automatik sichtbar machen.** Jeder volle Lauf (nicht `--only`, `--note`, `--dry-run`) landet mit
+allen Schritten in `.2ndbrain/daten/auto_letzter_lauf.json`, auch Läufe aus der Aufgabenplanung. Gemeldet
+wird die ganze Meldung eines Unterprogramms ab der Zeile mit `ERROR`/`FEHLER`, mit Hilfetext, nicht nur die
+letzte Zeile (`einlesen._meldung`). Scheitert ein Schritt unerwartet, kommt das Ende des Tracebacks dazu.
+Das Plugin (`core/automatik.ts`, `views/automatik.ts`) zeigt den Lauf hinter „mit Fehlern“ in Heute, über
+den Befehl „Automatik: letzter Lauf“ und über „Details“ in der Meldung. Gescheiterte Schritte stehen
+zuerst, für bekannte Fälle mit dem Ausweg: Kalender-Adresse je Gerät, fremder Modell-Ordner,
+fehlendes Paket, Modell-Server, fehlender Pfad. „Bericht kopieren“ liefert denselben Inhalt als Text,
+mit Plugin- und Engine-Version, System und Python; die Kalender-Adresse ersetzt das Plugin dabei durch
+`<Kalender-Adresse>`. Liefert die Engine kein JSON, behält das Plugin Code, Dauer und die letzten 40 Zeilen
+ihrer Fehlerausgabe. Ein Lauf im Hintergrund meldet sich nur, wenn ein Schritt neu scheitert. Sonst
+stünde alle 20 Minuten dieselbe Meldung da.
+
 Für das Handy: Das Plugin lädt dort ohne Node-Modul; die Sperre der Automatik schreibt es nur am
 Desktop; Frontmatter ändert es zeilengenau (kleine Änderungen, die der Sync zusammenführen kann);
 „ich“, Modell-Adresse und Chat-Rezepte kopiert es am Desktop in seine eigenen Daten, weil Ordner mit
@@ -627,5 +680,142 @@ Befehle deutsch; das Plugin folgt bei den Dateinamen, im Code selbst stehen engl
 | Protokoll | `.2ndbrain/protokoll-vorlage.md`, `## Protokoll` | `nachbereiten` | `protokoll.py` | – |
 | Protokoll zuordnen (Eingang → Termin) | `inbox/` → Termin-Notiz, `archive/protokolle/` | `protokolle` | `protokolle.py` | – |
 | Schreibweise (Verschreiber eines Namens) | Feld `schreibweisen:`, `reports/schreibweisen-review.md` | `schreibweisen` | `schreibweisen.py` | – |
-| Automatik | `.2ndbrain/daten/.auto_state.json` | `auto` | `auto.py` | `main.ts` |
+| Automatik | `.2ndbrain/daten/.auto_state.json`, `auto_letzter_lauf.json` | `auto` | `auto.py` | `main.ts`, `core/automatik.ts`, `views/automatik.ts` |
+| Fokus, Nordstern, Fokus-Spiegel | Felder `fokus`, `ziel`, `target_date`; `reports/fokus-spiegel.md` | `fokus` | `fokus.py` | `core/fokus.ts`, `views/fokus.ts` |
 | Befehlszeile | – | `help` | `befehle.py` | `desktop/engine.ts` |
+
+## 24. Wenig vorlegen: Stand als Delta, Briefing ohne Schablone, Lagebild
+
+Die Engine erfasst mehr, als man lesen kann. Was sie vorlegt, ist deshalb begrenzt und sagt zuerst, was sich
+geändert hat (Befund 17.11.2026 am eigenen Vault: 13 Briefing-Zeilen mit derselben Frage, „20 Risiken“ je Thema).
+
+- **Stand-Block (§4.3).** Vor den Zahlen stehen zwei Zeilen: *Neu (14 Tage)* – die jüngsten Log-Einträge ohne
+  Risiken, höchstens drei – und *Braucht dich* – die eigenen offenen Punkte am Thema, die zwei dringendsten
+  beim Namen. Risiken stehen in Gruppen („20 in 8 Gruppen – Lager Nord (3), …“): gleiche Stichworte vor
+  dem Doppelpunkt oder ähnlicher Wortlaut sind ein Risiko mit mehreren Seiten. Rollen und Beteiligte stehen
+  eingeklappt unter dem Block.
+- **Briefing.** Höchstens sechs Themen (`briefing.hoechstens`), zwei kritisch, drei wichtig. Eine Frage steht
+  nur da, wenn es eine bestimmte gibt (echte offene Frage, verstrichene Frist, mehrfach vertagt, verstummt) –
+  keine „Wie steht es um …?“. Die Begründung nennt, was dieses Thema auszeichnet; „als Risiko erfasst“ und
+  „Projekt auf rot“ nur, wenn sonst nichts begründet. Ein Vorgänger, der nur über einen ähnlichen Titel unter
+  der Schwelle der Historie (0,80) gefunden wurde, gilt nicht als Vorgänger; die Vorbereitung nennt ihn als
+  „am ähnlichsten“ und bittet um Zuordnung der Reihe.
+- **Lagebild** (`reports/lagebild.md`, `2ndbrain lagebild`, in der Automatik mit `stand`): Zusagen je Person als
+  Balken mit typischem Alter (fett ab 30 Tagen – „hängt“), das Themen-Radar (offene Punkte gegen Tage seit der
+  letzten Bewegung, gemessen am jüngsten Eintrag im Vault, Farbe = Ampel) und die Abläufe des Kanons, jeder
+  Kontext in der Ampelfarbe des Themas dahinter (über die Subdomäne oder `atlas_id`).
+- **Altbestand auslaufen lassen.** `2ndbrain altbestand --parken` zeigt, welche ungeprüften Alt-Punkte älter als
+  60 Tage, ohne Frist und ohne Fokus sind; mit `--anwenden` werden sie `[-]` mit dem Vermerk „Geparkt am …“ –
+  aus allen Sichten, nicht gelöscht. Nie automatisch.
+
+## 23. Triage: was mache ich mit meinen offenen Punkten?
+
+„Meine Aufgaben“ ist eine Liste gleich aussehender Zeilen. Die Triage (`triage.py`, im Plugin „Meine Woche“)
+macht daraus Vorschläge, die man mit einem Klick bestätigt. Die Regeln rechnet der Code, die erste zutreffende
+gilt; das Modell bestimmt nur die Art der Tätigkeit, wo die Wörter sie nicht hergeben (sein Urteil wird gemerkt):
+
+| Vorschlag | Regel |
+|---|---|
+| Atlas | der Punkt ändert den Kanon (Kontext, Ereignis, Fachobjekt, Landkarte – und ein Wort, das ändert) |
+| Nachfassen | der Text nennt jemand anderen als Handelnden („Prüfung durch X“, „X muss …“) |
+| Selbst | Fokus-Thema (auch über das Dach-Thema), oder die Tätigkeit ist entscheiden, freigeben, antworten |
+| Parken | älter als 60 Tage, ohne Frist, kein Termin zum Thema in den nächsten 14 Tagen |
+| Übergeben | die Tätigkeit ist Ausarbeitung, und im Punkt („mit X …“) oder am Thema steht jemand aus der eigenen Linie (§22); wer direkt berichtet, zuerst |
+| Selbst | alles andere (Abstimmungen führt man selbst) |
+
+**Matrix.** Übergeben geht nicht nur in der eigenen Linie. `delegation` in `.2ndbrain/local.config.json` nennt
+den Fachkreis: `rollen` (Personen, deren Rolle eines der Wörter enthält, z. B. „architekt“), `personen`
+(einzelne dazu), `gruppen` (leer = alle). Gruppen sind die Teams (mit Leitung) und die Reihen (die Runden aus
+dem Kalender mit den Personen, die dort regelmäßig dabei sind). Rang der Vorschläge: im Punkt genannte Person
+(eigene Linie vor Fachkreis) › im Punkt genanntes Team oder genannte Runde › am Thema beteiligte Person › die
+Runde, die das Thema behandelt. An ein Team übergeben heißt: die Leitung trägt den Punkt; in eine Runde geben
+heißt: der Punkt bleibt bei mir, hängt aber an der Reihe und kommt in ihre nächste Vorbereitung.
+
+Vorgelegt werden höchstens zehn Punkte je Woche: höchstens zur Hälfte Fälliges, dann reihum aus jeder Gruppe. Bestätigen
+schreibt an der Quelle des Punkts: bei *übergeben* und *nachfassen* wechselt die verantwortliche Person, darunter
+steht eingerückt, von wem und wann – der Punkt erscheint danach unter „Nachfassen“; *parken* macht ihn `[-]` mit
+dem Vermerk „Geparkt am …“ (aus den Sichten, nicht gelöscht); *selbst* und *Atlas* lassen den Punkt stehen und
+merken die Entscheidung in `.2ndbrain/daten/triage.json`, er wird nicht noch einmal vorgelegt.
+
+## 22. Organisation: wer berichtet an wen
+
+Die Berichtslinie steht auf den Personenseiten; `organisation.py` liest sie und kennt drei Quellen, die
+stärkste gewinnt: `berichtet_an: '[[slug]]'` im Frontmatter (von Hand, gilt immer), die disziplinarische Linie
+aus dem Verzeichnis („Vorgesetzt: …“ im Abschnitt „Organisation (automatisch)“, oder die Person steht bei
+jemandem unter „Direct Reports“), sonst die fachliche Linie des Organigramms („Berichtet fachlich an“). Den
+Abschnitt schreibt ein Organigramm-Import; die Engine liest ihn nur. Ändert sich etwas, trägt man
+`berichtet_an` ein.
+
+Daraus: das **Verhältnis einer Person zu mir** (berichtet an mich · in meiner Linie · über mir · gleiche
+Führungskraft · andere Linie · ohne Platz) als Grundlage für die Einordnung von Aufgaben (übergeben kann man
+nur in der eigenen Linie, bei allen anderen fasst man nach) und `reports/orgchart.md` (`2ndbrain orgchart`,
+in der Automatik mit dem Schritt `personen`): das Bild der eigenen Linie mit den offenen Zusagen je Person,
+die Tabelle der direkten Berichte und die Pflegeliste – Personen mit offenen Zusagen, deren Platz unbekannt ist.
+
+## 21. Alles neu aufbauen
+
+Ändert sich, wie Aufgaben, Entscheidungen oder der Stand abgeleitet werden, bliebe der Bestand im alten
+Zustand. `2ndbrain neuaufbau` (im Plugin: „Alles neu aufbauen“) rechnet ihn aus den Ursprungsdaten neu –
+**in einer Kopie neben dem Vault** (`<Vault>-neuaufbau-<Datum>`), nie im Vault selbst. Jeder schreibende
+Schritt prüft die Marke `.2ndbrain/daten/neuaufbau.json`, die nur in einer Kopie steht.
+
+| Schritt | Was passiert |
+|---|---|
+| `anlegen` | Vault kopieren (unter der Sperre der Automatik), Kopie kennzeichnen |
+| `zuruecksetzen` | Stand vorher festhalten; Termine mit Material: Nachbereitung zurücknehmen (Sicherung, sonst Entscheidungen/Actions/Parkplatz/Kernteil leeren), aus dem Archiv zurück, vormerken; Mails und Dokumente zurück in den Eingang; aus den Themen heraus, was aus diesen Quellen stammt (Log-Zeilen, übernommene Punkte) |
+| `bauen` | jeden Termin einzeln nachbereiten und ins Themen-Log (Fortschritt nach jedem Termin, fortsetzbar), Eingang einarbeiten, Altbestand, Archiv, Stand, Personen; was vorher erledigt oder verworfen war, ist es wieder |
+| `vergleichen` | `reports/neuaufbau-vergleich.md`: Zahlen vorher/nachher, je Thema, was wegfällt, was dazukommt |
+
+Ursprungsdaten sind das Material der Termin-Notizen (Transkript, Mitschrift, eigene Notizen) und die Mails
+und Dokumente, die das Einarbeiten ins Archiv gelegt hat. Termin-Notizen ohne Material (alte Notizen) bleiben,
+wie sie sind – aus ihnen lässt sich nichts neu rechnen. Umgeschaltet wird von Hand (Ordner umbenennen, der alte
+bleibt als Sicherung); die Engine schaltet nicht um und löscht nichts.
+
+## 20. Fokus: das Wichtigste priorisiert voranbringen
+
+Der Vault weiß, wo jedes Thema steht. Er weiß aber nicht, welche Themen dir am wichtigsten sind und ob deine
+Zeit dorthin geht. Fokus ist dafür **kein neues Ding neben den Themen, sondern ein Rang an einem Thema**:
+`fokus: 1` ist das wichtigste, dazu `ziel` (ein Satz) und der Zieltermin (`target_date`). Ein Dach-Thema
+mit Unterthemen ist ein **Nordstern**. Was in den Unterthemen passiert, zählt für ihn mit: Schritte,
+Bewegung, Termine. Mehr als fünf Fokus-Themen meldet das Plugin, denn dann ist es kein Fokus mehr.
+
+**Planen** („Fokus planen“, `views/fokus.ts`; am Handy genauso): Themen wählen und ordnen, je Thema Ziel,
+Zieltermin und der nächste Schritt mit Frist. Geschrieben wird beim Speichern, zeilengenau ins Frontmatter
+(`fmUpdate`). Der Schritt wird ein normaler Punkt in `## Offene Punkte` des Themas, mit dir als
+verantwortlich (`renderTask`, `appendToSection` im Plugin wie `aufgaben.render` und
+`append_to_section` in der Engine). Damit gilt er überall, wo Aufgaben gelten.
+
+**Was der Code zählt** (`core/fokus.ts` und `fokus.py`, dieselben Regeln):
+- **Nächster Schritt:** dein offener Punkt in der Menge, Frist zuerst, ohne Frist der älteste. Fragen an
+  andere sind kein Schritt.
+- **Bewegung:** Einträge im Log der Menge. Der Anlage-Eintrag der Vorlage zählt nicht.
+- **Termine:** Termin-Notizen (aktiv und archiviert) mit einem Thema der Menge, ohne übersprungene und
+  entfallene. Ihre Dauer kommt aus dem Kalender: `dauer_min` in `events.json`, aus DTEND oder DURATION,
+  bei Serien die der Serie, beim verschobenen Einzeltermin seine eigene. Zugeordnet wird über UID und Tag,
+  sonst über Tag, Zeit und Titel, sonst über einen eindeutigen Titel am Tag.
+- **Zeit:** alle Termin-Notizen des Zeitraums, eingeteilt in *Fokus · andere Themen · ohne Thema*. Gezählt
+  wird nach Minuten, solange welche bekannt sind, sonst nach Anzahl. Ohne Thema zählt nicht als Fokus.
+  Die Zahl ist so gut wie die Zuordnung der Termine.
+- **Warnungen:** kein nächster Schritt, 14 Tage ohne Bewegung, kein Termin in den nächsten 14 Tagen,
+  Zieltermin überschritten, kein Ziel formuliert.
+
+**Wo es erscheint:**
+- *Heute* zeigt den Fokus ganz oben, mit der Zeit der letzten 14 Tage. Termine und Aufgaben zu einem
+  Fokus tragen einen ★.
+- Die **Vorbereitung** eines Termins zum Fokus nennt Ziel und nächsten Schritt und fragt, was der Termin
+  dafür bringen soll. Die Blocktabelle rechnet dabei mit der echten Dauer des Termins.
+- Der **Chat** hat das Werkzeug `fokus` (auch vorab, wenn die Frage nach Fokus, Prioritäten oder dem
+  „Richtigen“ fragt).
+- `2ndbrain fokus` zeigt dieselben Zahlen im Terminal.
+
+**Fokus-Spiegel** (Schritt `fokus` der Automatik nach `stand`, `reports/fokus-spiegel.md`): Einmal je Woche,
+beim ersten Lauf ab Montag, rechnet der Code für die letzten sieben Tage je Fokus:
+- Bewegung, erledigte und offene Schritte
+- Termine und Stunden
+- die Termine der Woche voraus, dazu die Liste der Termine ohne Fokus-Bezug
+
+Das Modell ordnet nur ein: 2–4 Sätze Überblick, eine Frage zur Woche, je Fokus 1–3 Sätze und genau eine
+Frage. Verworfen wird seine Antwort, wenn sie zu kurz oder zu lang ist, ein Datum nennt, das in keinem Fakt
+steht, oder einen Fokus erfindet. Dann steht der Spiegel mit den Zahlen allein da. Ohne Modell ebenso.
+Kommt das Modell später in der Woche, wird er mit Einordnung neu geschrieben (`mit_modell` im
+Frontmatter). „Fokus-Spiegel jetzt erstellen“ (`2ndbrain fokus --spiegel --neu`) schreibt ihn sofort.

@@ -136,12 +136,14 @@ def load_calendar_events(window: set[str]) -> list[dict]:
                 seen_titles.add(key)
                 # Blocker sind oben schon aussortiert - das Feld bleibt False
                 is_blocker = False
+                dauer = ev.get("dauer_min")
                 events.append({"date": d, "time": ev.get("time", ""),
                                "title": title,
                                "location": ev.get("location", ""),
                                "source": "calendar",
                                "blocker": is_blocker,
-                               "outlook_uid": ev.get("outlook_uid", "")})
+                               "outlook_uid": ev.get("outlook_uid", ""),
+                               "dauer_min": dauer if isinstance(dauer, int) and dauer > 0 else None})
             return events
         except (json.JSONDecodeError, OSError, TypeError) as e:
             print(f"[WARN] events.json nicht lesbar: {e}", file=sys.stderr)
@@ -549,9 +551,9 @@ _LEADING_INT_RE = re.compile(r"(\d+)")
 def _dauer_minutes(dauer) -> int | None:
     """Erste Zahl aus dem `dauer`-Freitext ("45–60 Min" -> 45) als Minutenbasis.
 
-    Es gibt keine echte Kalenderdauer im Event (`kalender.py` liefert
-    nur Start, kein Ende) - die Playbook-Angabe ist die einzige Grundlage fuer
-    die Minutenspalte der Blocktabelle. Ohne Zahl bleibt es bei Prozent.
+    Rueckfall fuer die Minutenspalte der Blocktabelle, wenn der Kalender keine Dauer liefert
+    (`dauer_min` aus events.json; Notiz ohne Kalendertermin, Markdown-Export). Ohne Zahl bleibt es
+    bei Prozent.
     """
     m = _LEADING_INT_RE.search(str(dauer or ""))
     return int(m.group(1)) if m else None
@@ -613,13 +615,14 @@ def due_for_prep(event_day: date, vorlauf: int, today: date) -> bool:
 def build_prep(ev: dict, previous: dict | None, project: dict | None,
                project_source: str = "", topics: list[dict] | None = None, forum_slug: str = "",
                forum_source: str = "", more: list[dict] | None = None,
-               projects: dict[str, dict] | None = None) -> str:
+               projects: dict[str, dict] | None = None, fokus_zeilen: list[str] | None = None) -> str:
     """Vorbereitungstext: Playbook-Leitfaden, Projektstand, Vorgaenger.
 
     Der Typ-Leitfaden (Ziel, Blocktabelle, Leitfragen, Risiko-Fokus) kommt aus
     `entities/meeting-playbooks/` (siehe `playbook.py`) und ist dort
     bearbeitbar. Genau das ist der Teil, der den Termin vorbereitet - nicht
-    die Terminliste.
+    die Terminliste. `fokus_zeilen` (fokus.prep_zeilen): gehoert der Termin zu einem
+    Fokus-Thema, stehen Ziel und naechster Schritt gleich unter dem Projekt.
     """
     typ = ev.get("type") or ag.detect_meeting_type(ev["title"])
     # Variante wird IMMER neu bestimmt, auch wenn der Typ per
@@ -652,6 +655,8 @@ def build_prep(ev: dict, previous: dict | None, project: dict | None,
         lines.append("**Weitere Themen:** " + ", ".join(
             f"[[{p['slug']}|{p['name']}]] {emo.get(str(p.get('health', '')).lower(), '')}".rstrip()
             for p in more))
+    if fokus_zeilen:
+        lines += [""] + fokus_zeilen
 
     # --- Forum / Gremium ---
     if forum_slug:
@@ -687,7 +692,7 @@ def build_prep(ev: dict, previous: dict | None, project: dict | None,
 
     blocks = view.get("blocks") or []
     if blocks:
-        total_min = _dauer_minutes(view.get("dauer"))
+        total_min = ev.get("dauer_min") or _dauer_minutes(view.get("dauer"))
         lines += ["", "| Block | Anteil | Inhalt |", "|---|---|---|"]
         for b in blocks:
             anteil = b.get("anteil", 0)
@@ -703,7 +708,21 @@ def build_prep(ev: dict, previous: dict | None, project: dict | None,
 
     # --- Vorgaenger ---
     lines.append("")
-    if previous:
+    # Ein Vorgaenger, der nur ueber einen aehnlichen Titel gefunden wurde, ist keiner, solange die
+    # Aehnlichkeit unter der Schwelle fuer die Historie liegt ("Monatliche Planungsrunde" bekam so
+    # "Planung Lagerumbau" als Vortermin, 0,70): dann lieber sagen, dass keiner sicher ist.
+    unsicher = None
+    if previous and str(previous.get("_match", "series")).startswith("similarity:"):
+        try:
+            if float(str(previous["_match"]).split(":")[1]) < bf.HISTORY_MIN_SIMILARITY:
+                unsicher, previous = previous, None
+        except ValueError:
+            pass
+    if unsicher:
+        lines.append(f"**Reihe:** `{ev.get('series')}` — kein sicherer Vorgänger. Am ähnlichsten: "
+                     f"[[{unsicher['path'].stem}]] ({unsicher['date']}, Titelähnlichkeit "
+                     f"{str(unsicher['_match']).split(':')[1]}) — gehört er dazu, die Reihe im Plugin zuordnen.")
+    elif previous:
         items = ag.extract_open_items(previous.get("content", ""))
         counts = ", ".join(f"{len(items[k])} {lbl}" for lbl, k in
                            (("Follow-ups", "actions"), ("Risiken", "risks"),
@@ -808,6 +827,9 @@ def run(days: int | None = None, dry_run: bool = False, as_json: bool = False,
     all_meetings = load_meeting_files()
     projects = load_projects()
     aliases = vp.alias_map()
+    import fokus as fk                  # Termine zu einem Fokus-Thema: Ziel und naechster Schritt dazu
+    fokus_liste = fk.themen()
+    fokus_tasks = tk.scan() if fokus_liste else []
 
     # Quellenregel (wichtig): "Was habe ich heute?" beantwortet der **Kalender**.
     # Dateien im Eingang mit echtem Inhalt sind Protokolle bereits gelaufener Termine -
@@ -821,8 +843,11 @@ def run(days: int | None = None, dry_run: bool = False, as_json: bool = False,
         else:
             skipped.append(m)
     have = {(m["date"], ag.series_key(m["title"])) for m in in_window + skipped}
+    dauer = {}                                   # Kalenderdauer auch fuer Termine, die schon eine Notiz haben
     for ev in load_calendar_events(window):
         key = (ev["date"], ag.series_key(ev["title"]))
+        if ev.get("dauer_min"):
+            dauer.setdefault(key, ev["dauer_min"])
         if key not in have:
             ev["series"] = ag.series_key(ev["title"])
             ev["type"] = ag.detect_meeting_type(ev["title"])
@@ -831,6 +856,9 @@ def run(days: int | None = None, dry_run: bool = False, as_json: bool = False,
             ev["content"] = ""
             in_window.append(ev)
             have.add(key)
+    for m in in_window:
+        if not m.get("dauer_min"):
+            m["dauer_min"] = dauer.get((m["date"], ag.series_key(m["title"])))
 
     # Vorlauf-Regel: ein Termin wird nicht nur im Tagesfenster aufgemacht,
     # sondern sobald `datum - vorbereitung_vorlauf <= heute` - sonst waere ein
@@ -925,10 +953,11 @@ def run(days: int | None = None, dry_run: bool = False, as_json: bool = False,
             
             topics = bf.build_topics(ev, all_meetings, project, forum_slug=forum_slug)
             import schreibweisen        # Namen wie auf ihren Seiten - auch aus Kalender und frueheren Terminen
+            slugs = [p["slug"] for p in [project, *more] if p]
             prep_action = apply_prep(
-                path, schreibweisen.vereinheitlichen(build_prep(ev, previous, project, project_source, topics,
-                                                                forum_slug, forum_source, more=more,
-                                                                projects=projects))[0],
+                path, schreibweisen.vereinheitlichen(build_prep(
+                    ev, previous, project, project_source, topics, forum_slug, forum_source, more=more,
+                    projects=projects, fokus_zeilen=fk.prep_zeilen(slugs, fokus_liste, fokus_tasks, vp.ich())))[0],
                 dry_run)
             # Vollstaendiges Frontmatter upserten. Dateien ohne Frontmatter
             # bekommen sonst nur Status-Keys und verlieren type/date/title fuer

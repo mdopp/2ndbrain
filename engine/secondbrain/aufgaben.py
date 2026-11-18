@@ -302,11 +302,15 @@ def append_to_section(text: str, heading: str, new: list[Task], names: Names | N
     lines = text.split("\n")
     existing = {key(t) for t in (parse_line(l) for l in lines) if t is not None} | (known or set())
     to_add: list[str] = []
+    neu = 0
     for t in new:
         k = key(t)
         if k and k not in existing:
             existing.add(k)
+            neu += 1
             to_add.append(render(t, names))
+            # Unterpunkte (Beleg aus dem Material) stehen eingerueckt unter ihrem Punkt
+            to_add.extend(NOTE_PREFIX + " ".join(str(n).split()) for n in t.notes if str(n).strip())
     if not to_add:
         return text, 0
 
@@ -314,12 +318,12 @@ def append_to_section(text: str, heading: str, new: list[Task], names: Names | N
     if idx is None:
         at = next((i for i, l in enumerate(lines) if l.strip() in insert_before), None)
         if at is None:
-            return text.rstrip("\n") + "\n\n" + "\n".join([heading, *to_add]) + "\n", len(to_add)
+            return text.rstrip("\n") + "\n\n" + "\n".join([heading, *to_add]) + "\n", neu
         block = [heading, *to_add, ""]
         if at > 0 and lines[at - 1].strip():
             block.insert(0, "")
         lines[at:at] = block
-        return "\n".join(lines), len(to_add)
+        return "\n".join(lines), neu
 
     end = next((j for j in range(idx + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
     # Unterabschnitte (Altbestand) bleiben unten: neue Punkte kommen davor
@@ -329,7 +333,7 @@ def append_to_section(text: str, heading: str, new: list[Task], names: Names | N
     after = last + 1 + len(to_add)
     if after < len(lines) and lines[after].startswith(("## ", "### ")):
         lines.insert(after, "")
-    return "\n".join(lines), len(to_add)
+    return "\n".join(lines), neu
 
 
 _SOURCE_TAIL_RE = re.compile(r"(\s*\(→ \[\[[^\]]*\]\]\))?\s*$")

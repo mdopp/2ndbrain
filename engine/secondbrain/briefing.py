@@ -52,12 +52,23 @@ IMPORTANT_AGE_DAYS = 7
 # der seit einem Monat offen ist, ist kein Info-Thema.
 CRITICAL_AGE_DAYS = 28
 DEADLINE_SOON_DAYS = 14
-MAX_TOPICS = 13
+# Ein Briefing liest man in der Minute vor dem Termin: sechs Themen, nicht dreizehn (Befund
+# 17.11.2026 am eigenen Vault - 13 Zeilen mit derselben Schablonenfrage las niemand). Anders:
+# `"briefing": {"hoechstens": N}` in .2ndbrain/local.config.json.
+MAX_TOPICS = 6
 # Die Stufen werden **relativ** vergeben, nicht ueber absolute Schwellen. Sonst
 # ist bei alten Punkten alles "kritisch": 13 rote Themen sind so unbrauchbar wie
 # keine. Obergrenzen wie in einem lesbaren Briefing.
-MAX_CRITICAL = 3
-MAX_IMPORTANT = 6
+MAX_CRITICAL = 2
+MAX_IMPORTANT = 3
+
+
+def hoechstens() -> int:
+    try:
+        n = int((vp.local_config().get("briefing") or {}).get("hoechstens") or MAX_TOPICS)
+    except (TypeError, ValueError):
+        n = MAX_TOPICS
+    return max(1, min(20, n))
 
 PRIO_CRITICAL, PRIO_IMPORTANT, PRIO_INFO = "kritisch", "wichtig", "info"
 PRIO_LABEL = {
@@ -387,9 +398,11 @@ def classify(topic: dict, project: dict | None, *, today: date | None = None) ->
         reasons.append(f"{topic['times_seen']}× vertagt seit {topic['first_seen']}")
     if topic["age_days"] >= CRITICAL_AGE_DAYS:
         reasons.append(f"seit {topic['age_days']} Tagen offen ({topic['first_seen']})")
-    if topic["kind"] == "risk":
+    # "als Risiko erfasst" und "Projekt auf rot" stehen sonst in jeder Zeile und sagen dann nichts:
+    # sie begruenden nur, wenn sonst nichts begruendet (die Rangfolge rechnet weiter mit ihnen)
+    if not reasons and topic["kind"] == "risk":
         reasons.append("als Risiko erfasst")
-    if health == "red":
+    if not reasons and health == "red":
         reasons.append("Projekt auf rot")
     if reasons:
         return PRIO_CRITICAL, "; ".join(reasons)
@@ -404,7 +417,7 @@ def classify(topic: dict, project: dict | None, *, today: date | None = None) ->
         reasons.append("Beschluss - Umsetzung prüfen")
     if topic["kind"] == "question":
         reasons.append("offene Frage")
-    if health == "yellow":
+    if not reasons and health == "yellow":
         reasons.append("Projekt auf gelb")
     if reasons:
         return PRIO_IMPORTANT, "; ".join(reasons)
@@ -413,24 +426,21 @@ def classify(topic: dict, project: dict | None, *, today: date | None = None) ->
 
 
 def default_question(topic: dict) -> str:
-    """Die Frage, die zum Thema im Termin gestellt gehoert."""
-    who = topic["owners"][0].lstrip("@") if topic["owners"] else ""
+    """Die Frage, die zum Thema im Termin gestellt gehoert - nur, wenn es eine bestimmte gibt: eine
+    echte offene Frage, eine verstrichene Frist, ein mehrfach vertagter Punkt, ein verstummtes Risiko.
+    Sonst "": "Wie steht es um X?" und "Ist X noch offen?" in jeder Zeile sind keine Fragen, sondern
+    Schablone - das Thema selbst steht ja da."""
     label = topic["label"].rstrip(".")
     if topic.get("stale"):
-        return f"„{label}“ wurde seit {topic['silent_days']} Tagen nicht mehr erwähnt — ist das Risiko erledigt?"
+        return f"Seit {topic['silent_days']} Tagen nicht mehr erwähnt — ist das Risiko erledigt?"
     if topic["kind"] == "question":
         q = " ".join(str(topic.get("context") or label).split()).rstrip(".")
         return q if q.endswith("?") else f"{q}?"
-    if topic["kind"] == "risk":
-        return f"Ist „{label}“ noch offen — und was unternehmen wir konkret?"
-    if topic["kind"] == "decision":
-        return f"Gilt „{label}“ noch, und ist es umgesetzt?"
-    if topic["overdue"]:
-        return f"„{label}“ ist über die Frist — was blockiert, und welches Datum gilt jetzt?"
-    if topic["times_seen"] >= CRITICAL_REPEATS:
-        return (f"„{label}“ steht zum {topic['times_seen']}. Mal auf der Agenda — "
-                f"was hält auf?")
-    return f"Wie steht es um „{label}“?" + (f" ({who})" if who else "")
+    if topic.get("overdue"):
+        return "Über die Frist — was blockiert, und welches Datum gilt jetzt?"
+    if int(topic.get("times_seen") or 0) >= CRITICAL_REPEATS:
+        return f"Zum {topic['times_seen']}. Mal auf der Agenda — was hält auf?"
+    return ""
 
 
 # ------------------------------------------------------------ Rendern
@@ -507,7 +517,7 @@ def build_topics(meeting: dict, all_meetings: list[dict], project: dict | None,
         _, t["why"] = classify(t, project, today=today)
         t["question"] = default_question(t)
     topics = assign_tiers(topics, project)
-    return topics[:MAX_TOPICS]
+    return topics[:hoechstens()]
 
 
 def _cell(text: str, limit: int = 240) -> str:

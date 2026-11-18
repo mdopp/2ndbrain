@@ -3,7 +3,7 @@
 // (core/chat.ts); jedes liefert Text fuers Modell - Notizen als [[Links]], damit die Antwort sie so
 // zitiert und der Link-Check sie kennt - und was gelesen wurde.
 
-import { ABFRAGE_WERKZEUGE, AbfrageKontext, abfrage, atlasAbfrage, aufgaben, log, termine } from "./abfragen";
+import { ABFRAGE_WERKZEUGE, AbfrageKontext, abfrage, atlasAbfrage, aufgaben, fokusAbfrage, log, termine } from "./abfragen";
 import { norm } from "./atlas";
 import { localIsoDate } from "./datum";
 import { Graph, Knoten, artFilter } from "./graph";
@@ -300,6 +300,7 @@ export async function fuehreAus(name: string, args: Record<string, unknown>, g: 
     read: `liest ${s("ziel")}`, search: `sucht „${s("query")}“`, path: `sucht Wege ${s("von")} ↔ ${s("nach")}`,
     neighbors: `schaut im Umkreis von ${s("von")}`, tasks: "sucht Aufgaben", log: "sucht im Log", meetings: "sucht Termine",
     query: "fragt Felder ab", atlas: `fragt den Atlas (${s("art")}${s("typ") ? `, ${s("typ")}` : ""})`,
+    fokus: "liest deinen Fokus",
   };
   opts.fortschritt?.(vorab[name] ?? name);
   const ctx: AbfrageKontext = { g, src, today: opts.today ?? localIsoDate(), me: opts.me ?? "" };
@@ -313,6 +314,7 @@ export async function fuehreAus(name: string, args: Record<string, unknown>, g: 
   else if (name === "meetings") r = { ...(await termine(ctx, args)), gelesen: [] };
   else if (name === "query") r = { ...abfrage(ctx, args), gelesen: [] };
   else if (name === "atlas") r = { ...atlasAbfrage(ctx, args), gelesen: [] };
+  else if (name === "fokus") r = { ...(await fokusAbfrage(ctx, args)), gelesen: [] };
   else {
     return { text: `Unbekanntes Werkzeug „${name}“ – es gibt ${WERKZEUGE.map((w) => w.name).join(", ")}.`, gelesen: [], schritt: name };
   }

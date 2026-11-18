@@ -106,6 +106,43 @@ details[open] > .sb-summary::before { transform: rotate(90deg); }
 .sb-capture .sb-buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
 .sb-capture ul { margin: 4px 0 8px; padding-left: 20px; }
 
+/* ---------- Fokus (Heute ganz oben, Fenster „Fokus planen“) ---------- */
+.sb-fokus-zeile { padding: 4px 0 6px; border-bottom: 1px solid var(--background-modifier-border-hover); }
+.sb-fokus-zeile:last-of-type { border-bottom: none; }
+.sb-fokus-rang { flex: none; min-width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%;
+  font-size: var(--font-ui-smaller); font-weight: var(--font-semibold); color: var(--text-on-accent);
+  background: var(--interactive-accent); }
+.sb-fokus-ziel, .sb-fokus-meta, .sb-fokus-schritt, .sb-fokus-warnung { padding-left: 24px; font-size: var(--font-ui-smaller); }
+.sb-fokus-ziel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-fokus-schritt { color: var(--text-normal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-fokus-schritt.sb-overdue { color: var(--color-red); }
+.sb-fokus-warnung { color: var(--color-orange); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sb-fokus-zeit { margin-top: 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.sb-fokus-stern { flex: none; color: var(--interactive-accent); }
+.sb-fokus-modal { width: min(760px, 92vw); }
+.sb-fokus .sb-fokus-liste { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.sb-fokus .sb-fokus-karte { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; }
+.sb-fokus .sb-fokus-feld { gap: 8px; }
+.sb-fokus .sb-fokus-feld .sb-label { margin-top: 0; }
+
+/* ---------- Automatik: letzter Lauf (Heute: „mit Fehlern“) ---------- */
+.sb-auto-link { color: inherit; text-decoration: none; cursor: pointer; }
+.sb-auto-link:hover { text-decoration: underline; }
+.sb-fehler { color: var(--text-error); }
+.sb-auto-modal { width: min(820px, 92vw); }
+.sb-auto .sb-auto-titel { font-weight: var(--font-semibold); margin-top: 12px; }
+.sb-auto .sb-auto-fehler { border-left: 3px solid var(--text-error); padding: 0 0 2px 10px; margin-top: 8px; }
+.sb-auto .sb-auto-pre { white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; margin: 4px 0;
+  font-size: var(--font-ui-smaller); background: var(--background-secondary); padding: 8px; border-radius: var(--radius-s);
+  user-select: text; }
+.sb-auto .sb-auto-ausweg { background: var(--background-modifier-hover); padding: 6px 8px; border-radius: var(--radius-s);
+  font-size: var(--font-ui-small); }
+.sb-auto .sb-auto-code summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: 4px; }
+.sb-auto .sb-auto-liste { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; font-size: var(--font-ui-small); }
+.sb-auto .sb-auto-schritt { display: flex; gap: 6px; flex-wrap: wrap; }
+.sb-auto .sb-auto-name { flex: none; min-width: 12em; }
+
 /* ---------- Textdatei bearbeiten (Einstellungen: Protokoll-Vorlage) ---------- */
 .sb-textfile-modal { width: min(880px, 92vw); }
 .sb-capture textarea.sb-textfile { min-height: 55vh; font-family: var(--font-monospace); font-size: var(--font-ui-small); }

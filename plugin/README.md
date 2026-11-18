@@ -16,11 +16,13 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.12.0)
+## Was es kann (0.13.0)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|
 | **Heute**: Radar, Termine mit Phase, Thema + Ampel, *Nachfassen*, meine Aufgaben zum Abhaken | ja | ja | nein |
+| **Fokus**: drei bis fünf Fokus-Themen mit Rang, Ziel, Zieltermin und nächstem Schritt (*Fokus planen*); ganz oben in *Heute* mit Warnungen und „wohin ging meine Zeit“ (Dauer aus dem Kalender), ★ an Terminen und Aufgaben; ein Dach mit Unterthemen ist ein Nordstern; Ziel und Schritt in der Vorbereitung; Chat-Werkzeug `fokus` | ja | ja | nein |
+| **Fokus-Spiegel**: jeden Montag `reports/fokus-spiegel.md` – Zahlen vom Code, Einordnung und je Fokus eine Frage vom Modell („Tue ich das Richtige?“) | lesen | ja | für die Einordnung |
 | **Cockpit-Seiten** (`01_Aufgaben.md`, `05_Risiken.md`): Codeblock `2ndbrain aufgaben` / `risiken`, ohne JavaScript in der Notiz | ja | ja | nein |
 | **Sofortsuche**: Thema oder Person → Stand-Block, offene Punkte, Fragen | ja | ja | nein |
 | **Nacherfassen**: Notizen anhängen, *Fand nicht statt*, überspringen | ja | ja | nein |
@@ -30,7 +32,7 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Anleitung**: eingebaut (`anleitung.md`, steckt in main.js), eigene Ansicht | ja | ja | nein |
 | **Offene Fragen** (Kanon, Systemübersicht) im Chat – der einzige Chat-Teil, der die Engine braucht | – | ja | nein |
 | **Thema zuordnen**, **Mit wem?**, Liste *Ohne Thema* | – | ja | nein |
-| **Automatik**: `2ndbrain auto` alle N Minuten; nach einem Update zieht sie alte Notizen im Hintergrund nach (*Heute* zeigt den Stand) | – | ja | teils |
+| **Automatik**: `2ndbrain auto` alle N Minuten; nach einem Update zieht sie alte Notizen im Hintergrund nach (*Heute* zeigt den Stand). „mit Fehlern“ in *Heute* öffnet den letzten Lauf: gescheiterte Schritte mit ganzer Meldung, Ausweg und Stelle im Code, *Bericht kopieren*, *Noch einmal laufen lassen* | – | ja | teils |
 | **Mails**: Absender und Empfänger als Verweise auf die Personen, Verteiler für sich; zählen für die Beteiligten eines Themas; im Chat als eigene Art („Welche Mails kamen von X?“) | ja | ja | nein |
 | **Systemübersicht (LikeC4)** | – | ja | nein |
 

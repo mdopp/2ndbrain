@@ -221,6 +221,7 @@ def parse_events(ics_data, start_date, end_date, own_emails=None, local=None):
             # `outlook_uid` bleibt der Name in den Notizen.
             'uid': o["uid"],
             'outlook_uid': o["uid"],
+            'dauer_min': o.get("minuten"),
         })
 
     # Sort by date descending (newest first)
@@ -376,6 +377,8 @@ if __name__ == '__main__':
             'status': ev.get('status', ''),
             'uid': ev.get('uid', ''),
             'outlook_uid': ev.get('outlook_uid', ''),
+            # Dauer in Minuten (DTEND/DURATION) - fuer "wohin geht meine Zeit" (fokus.py, Plugin)
+            'dauer_min': ev.get('dauer_min'),
         })
     payload.sort(key=lambda e: (e['date_iso'], e['time']))
     sidecar.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8', newline="\n")

@@ -339,9 +339,708 @@ def t_wrapup_skips_notes_without_prose():
     eq(r["status"], "kein Material")
 
 
+# ───────────────────────────────────────── 7. Fehlerbild und Modellwahl
+
+def t_fehler_einordnen_echte_meldungen():
+    """Die drei Meldungen aus dem Modell-Protokoll des eigenen Vaults (28./29.09.2026)."""
+    a = modell.fehler_einordnen("OSError: HTTP 409: Modell gross-a ist im Modus haushalt nicht erlaubt. "
+                                "Erlaubt ist: klein-b. Für die anderen Modelle in der Modell-Kachel umschalten.")
+    eq(a["art"], "gesperrt")
+    eq(a["erlaubt"], ["klein-b"], "das erlaubte Modell muss aus der Meldung kommen:")
+    ok("klein-b" in a["ursache"] and a["ausweg"], "Ursache nennt das erlaubte Modell, Ausweg fehlt nicht")
+    eq(modell.fehler_einordnen("HTTPError: HTTP Error 409: Conflict")["art"], "gesperrt")
+    eq(modell.fehler_einordnen("ConnectionResetError: [WinError 10054] Eine vorhandene Verbindung wurde vom "
+                               "Remotehost geschlossen")["art"], "abbruch")
+    eq(modell.fehler_einordnen("URLError: <urlopen error timed out>")["art"], "nicht_erreichbar")
+    eq(modell.fehler_einordnen("TimeoutError: timed out")["art"], "zeitlimit")
+    eq(modell.fehler_einordnen(modell.NO_SERVER)["art"], "kein_server")
+    b = modell.fehler_einordnen("Modell 'x' nicht in /v1/models (a, b)")
+    eq((b["art"], b["erlaubt"]), ("unbekannt_modell", ["a", "b"]))
+    e = modell.LLMUnavailableError("HTTPError: HTTP Error 409: Conflict")
+    eq(e.art, "gesperrt", "die Ausnahme traegt die Art:")
+
+
+def _modell_umgebung(cfg: dict):
+    d = Path(tempfile.mkdtemp(prefix="llmtest-"))
+    p = d / "llm.config.json"
+    import json as _json
+    p.write_text(_json.dumps(cfg), encoding="utf-8", newline="\n")
+    modell._ABGELEHNT.clear()
+    modell._ZULETZT.update(model="", ersatz_fuer="")
+    modell._LEASE["model"] = ""
+
+    def keine_lease_schnittstelle(method, url, payload, key, timeout):
+        raise OSError("HTTP 404 Not Found")
+
+    return (_EnvGuard(VAULT_LLM_OFFLINE=None, VAULT_LLM_URL=None, VAULT_LLM_MODEL=None, VAULT_LLM_KEY=None,
+                      VAULT_LLM_LOG=str(d / "log.jsonl")),
+            _AttrGuard(modell, CONFIG_PATH=p, _http_lease=keine_lease_schnittstelle))
+
+
+def t_lease_holt_das_gesperrte_modell():
+    """Mit Modell-Schluessel fordert die Engine das gesperrte Modell an und fragt es noch einmal -
+    auch fuer ein fest gewaehltes Modell (Pruefstufe). Der Schluessel steht nur im Kopf der Anfrage,
+    nie im Protokoll; die Lease geht am Ende zurueck."""
+    frei = set()
+    lease_rufe = []
+
+    def fake_post(url, payload, timeout):
+        if payload["model"] not in frei:
+            raise OSError(f"HTTP 409: Modell {payload['model']} ist im Modus haushalt nicht erlaubt. "
+                          "Im Haushalt antwortet nur das Haushaltsmodell klein. Ein anderes Modell braucht eine Lease.")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    def fake_lease(method, url, payload, key, timeout):
+        if method == "GET":                     # der Stand braucht keinen Schluessel
+            return {"state": "none", "holder": "", "allowed": ["klein"], "mode": "haushalt", "last_human_at": None}
+        lease_rufe.append((method, payload, key))
+        if key != "geheim-123":
+            raise modell.LeaseAbgelehnt(401, {"ok": False, "reason": "unauthorized"})
+        if method == "POST":
+            frei.add(payload["model"])
+            return {"ok": True, "state": "ready", "renew_after": 0}
+        return {"ok": True, "state": "released"}
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "klein", "model_pruefung": "pruefer"})
+    with env, attrs, _AttrGuard(modell, _http_post=fake_post, _http_lease=fake_lease):
+        try:
+            modell.complete([{"role": "user", "content": "x"}], model="pruefer")
+            ok(False, "ohne Schluessel haette es scheitern muessen")
+        except modell.LLMUnavailableError as e:
+            ok(e.art == "gesperrt" and "kein Modell-Schlüssel" in str(e), f"der Grund muss den fehlenden Schluessel nennen: {e}")
+        eq(lease_rufe, [], "ohne Schluessel gibt es keinen Aufruf der Lease-Schnittstelle:")
+
+        os.environ["VAULT_LLM_KEY"] = "falsch"
+        try:
+            modell.complete([{"role": "user", "content": "x"}], model="pruefer")
+            ok(False, "mit falschem Schluessel haette es scheitern muessen")
+        except modell.LLMUnavailableError as e:
+            ok("lehnt den Modell-Schlüssel ab" in str(e) and "falsch" not in str(e), f"Grund ohne Schluessel im Text: {e}")
+
+        os.environ["VAULT_LLM_KEY"] = "geheim-123"
+        eq(modell.complete([{"role": "user", "content": "x"}], model="pruefer"), "ok", "nach der Lease antwortet das Modell:")
+        eq(lease_rufe[-1], ("POST", {"model": "pruefer", "ttl_s": modell.LEASE_TTL_S, "holder": "2ndbrain"}, "geheim-123"),
+           "der Rumpf ist genau {model, ttl_s, holder}:")
+        log = Path(modell.config()["log"]).read_text(encoding="utf-8")
+        ok("geheim-123" not in log and '"task": "lease"' in log, "die Lease steht im Protokoll, der Schluessel nie")
+        ok(modell.lease_freigeben(), "die Lease muss zurueckgehen")
+        eq(lease_rufe[-1][0], "DELETE")
+        eq(modell._LEASE["model"], "")
+    modell._ABGELEHNT.clear()
+
+
+def t_complete_nimmt_naechstes_modell_der_liste():
+    """Gesperrtes Modell: das naechste der Liste antwortet, das gesperrte wird in diesem Prozess
+    nicht noch einmal gefragt, ein Modell ausserhalb der Liste nie."""
+    gefragt = []
+
+    def fake_post(url, payload, timeout):
+        gefragt.append(payload["model"])
+        if payload["model"] == "gross-a":
+            raise OSError("HTTP 409: Modell gross-a ist im Modus haushalt nicht erlaubt. Erlaubt ist: klein-z.")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "mittel-b", "modelle": ["gross-a", "mittel-b"]})
+    with env, attrs, _AttrGuard(modell, _http_post=fake_post):
+        eq(modell.kandidaten(), ["gross-a", "mittel-b"], "Reihe aus der Konfiguration:")
+        eq(modell.complete([{"role": "user", "content": "x"}]), "ok")
+        eq(gefragt, ["gross-a", "mittel-b"], "erst das beste, dann das naechste:")
+        eq(modell.zuletzt(), {"model": "mittel-b", "ersatz_fuer": "gross-a"})
+        modell.complete([{"role": "user", "content": "x"}])
+        eq(gefragt[2:], ["mittel-b"], "das gesperrte Modell wird nicht noch einmal gefragt:")
+        ok("klein-z" not in gefragt, "ein Modell ausserhalb der Liste darf nie einspringen")
+    modell._ABGELEHNT.clear()
+
+
+def t_complete_ohne_ersatz_meldet_die_sperre():
+    def fake_post(url, payload, timeout):
+        raise OSError("HTTP 409: Modell einzig ist im Modus haushalt nicht erlaubt. Erlaubt ist: klein-z.")
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "einzig"})
+    with env, attrs, _AttrGuard(modell, _http_post=fake_post):
+        try:
+            modell.complete([{"role": "user", "content": "x"}])
+            ok(False, "haette LLMUnavailableError werfen muessen")
+        except modell.LLMUnavailableError as e:
+            eq((e.art, e.erlaubt), ("gesperrt", ["klein-z"]))
+    modell._ABGELEHNT.clear()
+
+
+def t_complete_wiederholt_einen_abbruch_einmal():
+    aufrufe = []
+
+    def fake_post(url, payload, timeout):
+        aufrufe.append(1)
+        if len(aufrufe) == 1:
+            raise ConnectionResetError("[WinError 10054] vom Remotehost geschlossen")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "m"})
+    with env, attrs, _AttrGuard(modell, _http_post=fake_post):
+        eq(modell.complete([{"role": "user", "content": "x"}]), "ok")
+        eq(len(aufrufe), 2, "ein Abbruch wird genau einmal wiederholt:")
+
+    def immer(url, payload, timeout):
+        aufrufe.append(1)
+        raise ConnectionResetError("[WinError 10054] vom Remotehost geschlossen")
+
+    del aufrufe[:]
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "m"})
+    with env, attrs, _AttrGuard(modell, _http_post=immer):
+        try:
+            modell.complete([{"role": "user", "content": "x"}])
+            ok(False, "haette werfen muessen")
+        except modell.LLMUnavailableError as e:
+            eq(e.art, "abbruch")
+        eq(len(aufrufe), 2, "nach der einen Wiederholung ist Schluss:")
+
+
+def t_diagnose_haelt_beim_ersten_fehler():
+    def kein_netz(url, timeout):
+        raise OSError("Connection refused")
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "m"})
+    with env, attrs, _AttrGuard(modell, _http_get=kein_netz):
+        s = {x["schritt"]: x for x in modell.diagnose()}
+    eq([s[k]["ok"] for k in ("adresse", "server", "modell", "format", "werkzeuge")],
+       [True, False, None, None, None], "Schritte hinter dem Fehler bleiben ungeprueft:")
+    ok(s["server"]["ausweg"] and "antwortet nicht" in s["server"]["detail"], "Ursache und Ausweg fehlen")
+
+    def liste(url, timeout):
+        return {"data": [{"id": "m"}]}
+
+    def post(url, payload, timeout):
+        if "tools" in payload:
+            raise OSError("HTTP 400: tools not supported")
+        return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "m"})
+    with env, attrs, _AttrGuard(modell, _http_get=liste, _http_post=post):
+        s = {x["schritt"]: x for x in modell.diagnose()}
+    eq([s[k]["ok"] for k in ("adresse", "server", "modell", "format", "werkzeuge")],
+       [True, True, True, True, False])
+    ok("--jinja" in s["werkzeuge"]["ausweg"], "der Ausweg fuer fehlende Werkzeuge fehlt")
+
+
+# ───────────────────────────────────────── 8. Aufgaben: Art, Beleg, Zusammenfuehren
+
+def t_extract_ordnet_ein_und_fuehrt_zusammen():
+    material = ("Anna sagt zu, den Process Owner fuer den Software-Check zu bestaetigen und das Formular "
+                "einzureichen. Man muesste irgendwann das Dashboard zum Migrationsfortschritt bauen. "
+                "Die Angebotsvergleich liegt in Ordner 12, Bodo prueft die Unterlagen dort.")
+    fake_payload = {
+        "ziel": "", "entscheidungen": [], "kernteil": [], "parkplatz": [],
+        "actions": [
+            {"was": "Process Owner fuer den Software-Check bestaetigen und Formular einreichen", "wer": "Anna",
+             "bis": "", "art": "zusage",
+             "beleg": "Anna sagt zu, den Process Owner fuer den Software-Check zu bestaetigen"},
+            {"was": "Formular einreichen", "wer": "Anna", "bis": "", "art": "zusage", "beleg": ""},
+            {"was": "Dashboard zum Migrationsfortschritt bauen", "wer": "", "bis": "", "art": "absicht",
+             "beleg": "Man muesste irgendwann das Dashboard zum Migrationsfortschritt bauen"},
+            {"was": "Angebotsvergleich pruefen (liegt in Ordner 12)", "wer": "Bodo", "bis": "",
+             "art": "zusage", "beleg": "Bodo hat versprochen, alles bis Freitag zu liefern"},
+            {"was": "Pruefe die im Ordner 12 abgelegten Unterlagen zur Angebotsvergleich", "wer": "Bodo",
+             "bis": "", "art": "zusage", "beleg": ""},
+            {"was": "Raum fuer den Workshop buchen", "wer": "Raum Elbe III Erdgeschoss", "bis": "",
+             "art": "zusage", "beleg": ""},
+        ],
+    }
+    playbook_view = {"meeting_type": "checkin", "kernteil": [], "label": "Checkin", "nachbereitung": []}
+    with _AttrGuard(modell, complete_json=lambda messages, schema, **kw: (fake_payload, [])):
+        r = nachbereiten_modell.extract(material, playbook_view, {"title": "Checkin X"})
+    texte = [a["was"] for a in r["actions"]]
+    eq(len(texte), 3, f"Satzteil und Umschreibung muessen in ihrer Aufgabe aufgehen: {texte}")
+    ok("Formular einreichen" not in texte, "der Satzteil steht noch einzeln da")
+    anna = next(a for a in r["actions"] if a["wer"] == "Anna")
+    ok(anna["beleg"].startswith("Anna sagt zu"), "ein woertlicher Beleg bleibt")
+    bodo = next(a for a in r["actions"] if a["wer"] == "Bodo")
+    eq(bodo["beleg"], "", "ein Beleg, der nicht im Material steht, entfaellt:")
+    ok(bodo["was"].startswith("Pruefe die im Ordner"), "der laengere Text bleibt")
+    raum = next(a for a in r["actions"] if "Raum" in a["was"])
+    eq(raum["wer"], "", "ein Raum ist keine Person:")
+    ok(any(p.startswith("Noch ohne Zusage: Dashboard") for p in r["parkplatz"]),
+       f"eine Absicht gehoert in den Parkplatz: {r['parkplatz']}")
+    eq(r["eingeordnet"]["absicht"], 1)
+    ok(not nachbereiten_modell.aehnlich("Mit Theo das Budget fuer eine Testperson klaeren",
+                                        "Mit Theo verbindlich klaeren, wie die Testkapazitaeten eingesetzt werden"),
+       "zwei verschiedene Aufgaben mit derselben Person duerfen nicht zusammenfallen")
+
+
+def t_lease_haelt_sich_an_den_vertrag():
+    """Laib-Vertrag (docs/adr/0011): Ruhe nach einem Menschen, 202 -> GET abfragen statt neu senden,
+    409 held -> Halter und Ende nennen, eigene liegengebliebene Lease zuerst zurueckgeben."""
+    import time as _time
+    rufe = []
+    stand = {"state": "none", "holder": "", "allowed": ["klein"], "mode": "haushalt", "last_human_at": None}
+    antwort = {"POST": {"ok": True, "state": "ready", "renew_after": 0}}
+
+    def fake_lease(method, url, payload, key, timeout):
+        rufe.append(method)
+        if method == "GET":
+            return dict(stand)
+        if method == "POST":
+            if isinstance(antwort["POST"], Exception):
+                raise antwort["POST"]
+            if antwort["POST"].get("state") == "preparing":
+                stand.update(state="ready", holder="2ndbrain")      # beim naechsten GET ist es geladen
+            return antwort["POST"]
+        stand.update(state="none", holder="")
+        return {"ok": True, "state": "released"}
+
+    env, attrs = _modell_umgebung({"url": "http://modell.test", "model": "klein"})
+    with env, attrs, _AttrGuard(modell, _http_lease=fake_lease, _schlafen=lambda s: None):
+        os.environ["VAULT_LLM_KEY"] = "k"
+
+        stand["last_human_at"] = _time.time() - 60
+        ok_, grund = modell.lease_anfordern("gross")
+        ok(not ok_ and "jemand gefragt" in grund and "POST" not in rufe, f"nach einem Menschen wird nicht angefordert: {grund}")
+
+        stand["last_human_at"] = _time.time() - 3600
+        antwort["POST"] = {"ok": True, "state": "preparing", "retry_after": 30}
+        del rufe[:]
+        ok_, grund = modell.lease_anfordern("gross")
+        ok(ok_, f"nach dem Laden muss die Lease stehen: {grund}")
+        eq(rufe.count("POST"), 1, "waehrend des Ladens wird GET abgefragt, nicht noch einmal gesendet:")
+        ok(modell.lease_freigeben() and stand["holder"] == "", "Rueckgabe mit DELETE")
+
+        antwort["POST"] = modell.LeaseAbgelehnt(409, {"ok": False, "reason": "held", "holder": "foundry",
+                                                       "expires_at": 1794950000, "mode": "full", "allowed": ["klein", "mittel"]})
+        ok_, grund = modell.lease_anfordern("gross")
+        ok(not ok_ and "foundry hält den Modell-Server bis" in grund, f"Halter und Ende fehlen: {grund}")
+        ok_, grund = modell.lease_anfordern("mittel")
+        ok(ok_ and modell._LEASE["model"] == "", "im fremden Fenster schon erlaubt: weiter ohne eigene Lease")
+
+        stand.update(state="ready", holder="2ndbrain")              # von einem abgebrochenen Lauf
+        antwort["POST"] = {"ok": True, "state": "ready", "renew_after": 0}
+        del rufe[:]
+        ok(modell.lease_anfordern("gross")[0], "nach dem Aufraeumen neu anfordern")
+        eq(rufe[:3], ["GET", "DELETE", "GET"], "die liegengebliebene eigene Lease geht zuerst zurueck:")
+        modell.lease_freigeben()
+
+
+def t_gruppen_zusammenfuehren_prueft_die_wahl_des_modells():
+    actions = [
+        {"was": "Enablement-Sessions organisieren (Raum, Einladungen, Wellen)", "wer": "Otto", "bis": "", "art": "zusage", "beleg": ""},
+        {"was": "Git-Lizenzen zuweisen", "wer": "Rita", "bis": "", "art": "zusage", "beleg": "Rita kuemmert sich"},
+        {"was": "Koordination und Terminierung der Waves uebernehmen", "wer": "Otto Muster", "bis": "2026-10-01", "art": "zusage", "beleg": ""},
+        {"was": "Sandbox auf die Endgeraete bringen", "wer": "Rita", "bis": "", "art": "zusage", "beleg": ""},
+        {"was": "Sessions inhaltlich vorbereiten", "wer": "Anna", "bis": "", "art": "zusage", "beleg": ""},
+        {"was": "Liste der Teilnehmenden bereinigen", "wer": "", "bis": "", "art": "absicht", "beleg": ""},
+    ]
+    # 0+2 dieselbe Person (Vorname/voller Name) -> eine; 1+4 verschiedene Personen -> bleiben zwei;
+    # 99 gibt es nicht; 3 steht schon in keiner gueltigen Gruppe; Nummern nur einmal
+    antwort = {"gruppen": [[0, 2], [1, 4], [3, 99], [2, 5]]}
+    with _AttrGuard(modell, complete_json=lambda messages, schema, **kw: (antwort, [])):
+        out = nachbereiten_modell.gruppen_zusammenfuehren(actions)
+    eq(len(out), 5, f"nur die eine gueltige Gruppe faellt zusammen: {[a['was'] for a in out]}")
+    eq((out[0]["wer"], out[0]["bis"]), ("Otto Muster", "2026-10-01"), "der vollere Name und die Frist bleiben:")
+    ok(any(a["wer"] == "Anna" for a in out) and sum(a["wer"] == "Rita" for a in out) == 2,
+       "Aufgaben verschiedener Personen duerfen nie zusammenfallen")
+
+    def kaputt(messages, schema, **kw):
+        raise modell.LLMUnavailableError("HTTPError: HTTP Error 409: Conflict")
+
+    with _AttrGuard(modell, complete_json=kaputt):
+        eq(len(nachbereiten_modell.gruppen_zusammenfuehren(actions)), 6, "ohne Modell bleibt die Liste:")
+    eq(modell.fehler_einordnen("OSError: HTTP 409: Modell gross-a ist im Modus haushalt nicht erlaubt. Im Haushalt "
+                               "antwortet nur das Haushaltsmodell mittel-b. Ein anderes Modell braucht eine Lease.")["erlaubt"],
+       ["mittel-b"], "auch diese Fassung der Sperre nennt das erlaubte Modell:")
+
+
+def t_ausgefallene_pruefung_steht_im_ergebnis():
+    d = Path(tempfile.mkdtemp(prefix="llmtest-"))
+    cfg = d / "llm.config.json"
+    cfg.write_text('{"url": "http://modell.test", "model": "entwurf", "model_pruefung": "pruefer"}', encoding="utf-8")
+    payload = {"ziel": "", "entscheidungen": [{"was": "Budget freigeben", "wer": "A", "datum": ""}],
+               "actions": [], "kernteil": [], "parkplatz": []}
+
+    def fake(messages, schema, **kw):
+        if kw.get("model") == "pruefer":
+            raise modell.LLMUnavailableError("OSError: HTTP 409: Modell pruefer ist im Modus haushalt nicht erlaubt.")
+        return payload, []
+
+    view = {"meeting_type": "checkin", "kernteil": [], "label": "Checkin", "nachbereitung": []}
+    with _EnvGuard(VAULT_LLM_URL=None, VAULT_LLM_MODEL=None), _AttrGuard(modell, CONFIG_PATH=cfg, complete_json=fake):
+        r = nachbereiten_modell.extract("Material fuer den Test. " * 5, view, {"title": "X"})
+    ok("pruefer" in r.get("pruefung_ausgefallen", "") and "nicht zu" in r["pruefung_ausgefallen"],
+       f"der Ausfall der Pruefstufe muss mit Ursache im Ergebnis stehen: {r.get('pruefung_ausgefallen')!r}")
+    eq(len(r["entscheidungen"]), 1, "der Entwurf gilt:")
+
+
+def t_beleg_steht_als_unterpunkt():
+    text = _NOTE_TEMPLATE.format(material="egal")
+    result = {"entscheidungen": [], "kernteil": [], "parkplatz": [], "offene_fragen": [],
+              "actions": [{"was": "Formular einreichen", "wer": "Yzx", "bis": "", "beleg": "Yzx reicht das Formular ein"},
+                          {"was": "Termin aufsetzen", "wer": "Yzx", "bis": ""}]}
+    neu, counts = nachbereiten.write_extract(text, result, {"kernteil": []}, None, {})
+    eq(counts["actions_neu"], 2, "gezaehlt werden Punkte, nicht Zeilen:")
+    ok("- [ ] Formular einreichen — Yzx (?)\n    - Beleg: „Yzx reicht das Formular ein“\n- [ ] Termin aufsetzen" in neu,
+       "der Beleg muss eingerueckt unter seinem Punkt stehen")
+    import aufgaben
+    eq(len(aufgaben.tasks_in_text(neu, "meeting")), 2, "der Unterpunkt ist kein eigener Punkt:")
+    eq(nachbereiten.write_extract(neu, result, {"kernteil": []}, None, {})[0], neu, "zweites Schreiben aendert nichts:")
+
+
+# ───────────────────────────────────────── 9. Alles neu aufbauen
+
+def t_neuaufbau_schuetzt_den_vault():
+    """Schreibende Schritte laufen nur in einer Kopie; die Kopie liegt nie im Vault; aus Themen geht
+    nur heraus, was aus einem zurueckgesetzten Termin stammt - samt Unterpunkten."""
+    import neuaufbau
+    for schritt in (neuaufbau.zuruecksetzen, neuaufbau.bauen, neuaufbau.vergleichen, neuaufbau.erledigt_uebernehmen):
+        try:
+            schritt()
+            ok(False, f"{schritt.__name__} haette im Vault abbrechen muessen")
+        except SystemExit as e:
+            ok("keine Neuaufbau-Kopie" in str(e), f"Grund fehlt: {e}")
+    r = neuaufbau.anlegen(_VAULT / "drinnen")
+    ok(not r["ok"] and "nicht im Vault" in r["grund"], f"eine Kopie im Vault muss abgelehnt werden: {r}")
+
+    thema = "\n".join([
+        "## Offene Punkte",
+        "- [ ] Bleibt — [[a-b|A B]] ➕ 2026-09-01 (→ [[2026-09-01 - alt]])",
+        "- [ ] Geht — [[a-b|A B]] ➕ 2026-09-22 (→ [[2026-09-22 - neu]])",
+        "    - Beleg: „gehört zum entfernten Punkt“",
+        "- [x] Geht auch ➕ 2026-09-22 ✅ 2026-09-25 (→ [[2026-09-22 - neu]])",
+        "## Event Log",
+        "- [2026-09-22] [DECISION] Geht (→ [[2026-09-22 - neu]])",
+        "- [2026-09-01] [RISK] Bleibt (→ [[2026-09-01 - alt]])",
+        "Fließtext mit (→ [[2026-09-22 - neu]]) bleibt, er ist keine Listenzeile"])
+    neu, n = neuaufbau._zeilen_mit_quelle_entfernen(thema, {"2026-09-22 - neu"})
+    eq(n, 3, "zwei Punkte und eine Log-Zeile:")
+    ok("Beleg" not in neu and "Geht —" not in neu and "Bleibt —" in neu and "[RISK] Bleibt" in neu
+       and "Fließtext" in neu, f"falsch entfernt:\n{neu}")
+    eq(neuaufbau._abschnitt_leeren("## Actions\n- [ ] x\n\n## Parkplatz\n- y\n", "## Actions"),
+       "## Actions\n\n## Parkplatz\n- y\n", "nur der eine Abschnitt wird geleert:")
+
+    kopie = Path(tempfile.mkdtemp(prefix="neuaufbau-")) / "kopie"
+    r = neuaufbau.anlegen(kopie)
+    ok(r["ok"] and (kopie / ".2ndbrain" / "daten" / neuaufbau.MARKE).is_file(), f"Kopie mit Marke: {r}")
+    ok(not (_VAULT / ".2ndbrain" / "daten" / neuaufbau.MARKE).exists(), "der Vault selbst bekommt keine Marke")
+    ok(not neuaufbau.anlegen(kopie)["ok"], "ein vorhandener Ordner wird nicht ueberschrieben")
+
+
+# ───────────────────────────────────────── 10. Organisation
+
+def t_organisation_liest_die_linie():
+    """Von Hand vor Verzeichnis vor Organigramm; "Direct Reports" zaehlt als Verzeichnis; ein Kreis in
+    den Daten haengt nichts auf; das Verhaeltnis zu mir stimmt in jede Richtung."""
+    import organisation
+    people = _VAULT / "entities" / "people"
+    people.mkdir(parents=True, exist_ok=True)
+
+    def seite(slug, name, block="", fm=""):
+        people.joinpath(f"{slug}.md").write_text(
+            f"---\ntype: person\nname: {name}\n{fm}---\n# {name}\n\n<!-- orgchart-auto:start -->\n{block}\n<!-- orgchart-auto:end -->\n",
+            encoding="utf-8", newline="\n")
+
+    seite("org-chefin", "Chefin Oben", "- **Direct Reports (M365):** [[org-ich|Ich Selbst]] · [[org-peer|Peer Kollege]]")
+    seite("org-ich", "Ich Selbst", "- **Berichtet fachlich an (Organigramm):** [[org-fremd|Fremd Anders]]\n"
+          "- **M365 (2026-09-16):** Titel · Abteilung · Vorgesetzt: [[org-chefin|Chefin Oben]]")
+    seite("org-peer", "Peer Kollege", "- **Berichtet fachlich an (Organigramm):** [[org-fremd|Fremd Anders]]")
+    seite("org-direkt", "Direkt Bericht", "- **Berichtet fachlich an (Organigramm):** [[org-ich|Ich Selbst]]")
+    seite("org-enkel", "Enkel Bericht", "- **Berichtet fachlich an (Organigramm):** [[org-fremd|Fremd Anders]]",
+          fm="berichtet_an: '[[org-direkt]]'\n")
+    seite("org-fremd", "Fremd Anders", "- **Berichtet fachlich an (Organigramm):** [[org-kreis|Kreis Lauf]]")
+    seite("org-kreis", "Kreis Lauf", "- **Berichtet fachlich an (Organigramm):** [[org-fremd|Fremd Anders]]")
+    seite("org-allein", "Allein Ohne")
+
+    org = organisation.lade()
+    eq((org.vorgesetzt("org-ich"), org.personen["org-ich"]["quelle"]), ("org-chefin", "Verzeichnis"),
+       "Verzeichnis schlaegt Organigramm:")
+    eq((org.vorgesetzt("org-peer"), org.personen["org-peer"]["quelle"]), ("org-chefin", "Verzeichnis"),
+       "wer unter Direct Reports steht, berichtet dorthin:")
+    eq((org.vorgesetzt("org-enkel"), org.personen["org-enkel"]["quelle"]), ("org-direkt", "von Hand"),
+       "von Hand schlaegt alles:")
+    eq(org.linie("org-enkel"), ["org-direkt", "org-ich", "org-chefin"])
+    ok(len(org.linie("org-fremd")) <= 2, "ein Kreis in den Daten darf nicht endlos laufen")
+    eq(org.alle_berichte("org-ich"), ["org-direkt", "org-enkel"])
+    eq([org.verhaeltnis("org-ich", s) for s in ("org-direkt", "org-enkel", "org-chefin", "org-peer", "org-fremd", "org-allein", "gibt-es-nicht")],
+       [organisation.DIREKT, organisation.LINIE, organisation.VORGESETZT, organisation.KOLLEGE, organisation.ANDERE,
+        organisation.UNBEKANNT, organisation.UNBEKANNT])
+    b = organisation.bild(org, "org-ich", {"org-direkt": 3})
+    ok('p_org_chefin --> p_org_ich' in b and 'p_org_ich --> p_org_direkt' in b and 'p_org_direkt --> p_org_enkel' in b,
+       f"Linie ueber mir, direkte Berichte und die Ebene darunter:\n{b}")
+    ok('Direkt Bericht<br/>3 offen' in b, "offene Zusagen stehen am Namen")
+    eq(organisation.luecken(org, "org-ich", {"org-allein": 2, "org-direkt": 1, "org-ich": 5}), ["org-allein"],
+       "zu pflegen ist, wer Zusagen hat und keinen Platz:")
+
+
+# ───────────────────────────────────────── 11. Triage
+
+def t_triage_ordnet_ein():
+    """Die Regeln an echten Formen von Punkten (Namen erfunden) - in der Reihenfolge des Moduls."""
+    import organisation
+    import triage
+    from datetime import date as _date
+    import aufgaben
+    eq([triage.art_aus_woertern(s) for s in (
+        "Freigabe für die Löschung der zwei Buchungen geben", "Mit Theo klären, wie die Testkapazitäten eingesetzt werden",
+        "Dashboard zum Migrationsfortschritt erstellen", "Mit Till abstimmen und entscheiden, ob daraus Routing wird",
+        "Wissenstransfer zur Transformationslogik")],
+       ["entscheiden", "abstimmen", "ausarbeiten", "entscheiden", "unklar"])
+    ok(triage.ist_atlas("Füge das fehlende Ereignis „Packstück ausgelagert“ in die Landkarte und Ereignisliste ein."))
+    ok(triage.ist_atlas("Ordne „Schadensfotos archiviert“ dem Kontext Warehouse Processing zu"))
+    ok(not triage.ist_atlas("Emil und Rita in die Domain-Atlas-Gruppe aufnehmen"), "eine Gruppe ist keine Kanon-Aenderung")
+    ok(not triage.ist_atlas("Domain Atlas Workshop-Tool an das Team teilen"))
+    eq(triage.anderer_handelnder("Prüfung durch Nordfracht, ob die gelbe Kennzeichnung noch begründet ist"), "Nordfracht")
+    eq(triage.anderer_handelnder("Produktbereiche Nord und Sued müssen eine gemeinsame Entscheidung treffen"),
+       "Produktbereiche Nord und Sued")
+    eq(triage.anderer_handelnder("Mit Theo klären, wer das Budget trägt"), "")
+
+    org = organisation.Organisation({
+        "ich": {"name": "Ich Selbst", "rolle": "", "team": "", "aktiv": True, "vorgesetzt": "", "quelle": ""},
+        "bert": {"name": "Bert Direkt", "rolle": "", "team": "", "aktiv": True, "vorgesetzt": "ich", "quelle": "Verzeichnis"},
+        "carla": {"name": "Annaa Enkel", "rolle": "", "team": "", "aktiv": True, "vorgesetzt": "bert", "quelle": "Organigramm"},
+        "dora": {"name": "Dora Fremd", "rolle": "", "team": "", "aktiv": True, "vorgesetzt": "", "quelle": ""}})
+    linie = triage._in_meiner_linie(org, "ich")
+    eq(linie, {"bert": organisation.DIREKT, "carla": organisation.LINIE})
+    themen = {"betrieb": {"titel": "Betrieb", "fokus": False, "parent": "", "beteiligte": ["carla", "dora"], "naechster_termin": ""},
+              "kern": {"titel": "Kern", "fokus": True, "parent": "", "beteiligte": ["bert"], "naechster_termin": ""},
+              "unter": {"titel": "Unter", "fokus": False, "parent": "kern", "beteiligte": [], "naechster_termin": ""}}
+    heute = _date(2026, 11, 18)
+
+    def e(text, thema="betrieb", created="2026-11-10", due=None, art=None):
+        t = aufgaben.Task(status=" ", text=text, owner="ich", topics=[thema], created=created, due=due)
+        return triage.einordnen(t, art=art or triage.art_aus_woertern(text), ich="ich", org=org, linie=linie,
+                                themen=themen, heute=heute)
+
+    eq(e("Dashboard zum Fortschritt erstellen")["vorschlag"], "uebergeben")
+    eq(e("Dashboard zum Fortschritt erstellen")["an"], "carla", "wer am Thema beteiligt und in meiner Linie ist:")
+    r = e("Mit Bert das Dashboard zum Fortschritt erstellen")
+    eq((r["vorschlag"], r["an"]), ("uebergeben", "bert"), "im Punkt genannt und direkter Bericht geht vor:")
+    eq(e("Bert in die Gruppe aufnehmen und Zugang einrichten")["an"], "carla", "wer nur Gegenstand ist, ist nicht genannt:")
+    eq(e("Dashboard erstellen", thema="unter")["vorschlag"], "selbst", "Fokus (auch ueber das Dach-Thema) bleibt bei mir:")
+    eq(e("Freigabe geben")["vorschlag"], "selbst")
+    eq(e("Dashboard erstellen", created="2026-07-01")["vorschlag"], "parken")
+    eq(e("Dashboard erstellen", created="2026-07-01", due="2026-12-01")["vorschlag"], "uebergeben", "mit Frist wird nicht geparkt:")
+    eq(e("Freigabe geben", created="2026-07-01")["vorschlag"], "selbst", "eine Entscheidung wird nicht geparkt:")
+    eq(e("Prüfung durch Nordfracht, ob die Kennzeichnung begründet ist")["vorschlag"], "nachfassen")
+    eq(e("Mit Theo klären, wer das Budget trägt")["vorschlag"], "selbst")
+
+
+def t_triage_matrix_und_gruppen():
+    """Matrix: uebergeben geht auch an den Fachkreis (nach Rolle oder benannt) und an Gruppen - ein Team,
+    das der Punkt nennt, oder die Runde, die das Thema behandelt. Die eigene Linie geht vor."""
+    import organisation
+    import triage
+    import aufgaben
+    from datetime import date as _date
+    P = lambda name, chef="", rolle="", team="": {"name": name, "rolle": rolle, "team": team, "aktiv": True,   # noqa: E731
+                                                   "vorgesetzt": chef, "quelle": ""}
+    org = organisation.Organisation({
+        "ich": P("Ich Selbst"), "bert": P("Bert Direkt", "ich"),
+        "arno": P("Arno Architekt", "wer-anders", "Lead Architect"), "eva": P("Eva Einzeln", "wer-anders", "Product Owner"),
+        "fritz": P("Fritz Fremd", "wer-anders", "Entwickler"), "wer-anders": P("Wer Anders")})
+    k = organisation.kreis(org, "ich", {"rollen": ["architekt", "architect"], "personen": ["eva"], "gruppen": []})
+    eq(k, {"bert": organisation.DIREKT, "arno": organisation.MATRIX, "eva": organisation.MATRIX},
+       "Linie, Rolle und einzeln benannt - sonst niemand:")
+    gruppen = {"lager-team": {"art": "team", "name": "Lager-Team", "namen": ["Lager-Team", "LGT"], "lead": "fritz", "thema": "", "personen": []},
+               "architektur": {"art": "reihe", "name": "Architektur-Runde", "namen": ["Architektur-Runde"], "lead": "", "thema": "plattform", "personen": ["arno"]}}
+    themen = {"plattform": {"titel": "Plattform", "fokus": False, "parent": "", "beteiligte": [], "naechster_termin": ""},
+              "edi": {"titel": "EDI", "fokus": False, "parent": "", "beteiligte": ["arno", "fritz"], "naechster_termin": ""}}
+
+    def e(text, thema):
+        t = aufgaben.Task(status=" ", text=text, owner="ich", topics=[thema], created="2026-11-10")
+        return triage.einordnen(t, art=triage.art_aus_woertern(text), ich="ich", org=org, linie=k, themen=themen,
+                                heute=_date(2026, 11, 18), gruppen=gruppen)
+
+    r = e("Schnittstellenbeschreibung erstellen", "edi")
+    eq((r["vorschlag"], r["an"]), ("uebergeben", "arno"), "am Thema beteiligt und im Fachkreis:")
+    ok("Fachkreis (Matrix)" in r["grund"], f"der Grund nennt die Matrix: {r['grund']}")
+    r = e("Mit Arno Architekt und Bert Direkt das Zielbild ausarbeiten", "edi")
+    eq(r["an"], "bert", "die eigene Linie geht vor dem Fachkreis:")
+    r = e("Gefahrgutdaten mit dem Lager-Team dokumentieren", "edi")
+    eq((r["an"], r.get("an_art")), ("gruppe:lager-team", "team"), "ein genanntes Team geht vor 'am Thema beteiligt':")
+    r = e("Zielbild für die Plattform dokumentieren", "plattform")
+    eq((r["an"], r.get("an_art")), ("gruppe:architektur", "reihe"), "sonst die Runde, die das Thema behandelt:")
+    eq(triage._genannte_gruppe("Mit LGT klären", gruppen), "", "ein kurzer Name (unter fuenf Zeichen) zaehlt nicht:")
+
+
+def t_triage_wendet_an_der_quelle_an():
+    import triage
+    from datetime import date as _date
+    d = _VAULT / "active-meetings"
+    d.mkdir(parents=True, exist_ok=True)
+    people = _VAULT / "entities" / "people"
+    people.mkdir(parents=True, exist_ok=True)
+    people.joinpath("tri-bert.md").write_text("---\ntype: person\nname: Bert Direkt\n---\n# Bert Direkt\n", encoding="utf-8", newline="\n")
+    note = d / "2026-11-10 - checkin - Triage.md"
+    note.write_text("---\ntype: meeting\ndate: '2026-11-10'\n---\n\n## Actions\n"
+                    "- [ ] Dashboard erstellen — [[tri-ich|Ich Selbst]] ➕ 2026-11-10\n"
+                    "    - Beleg: „ich baue das Dashboard“\n"
+                    "- [ ] Alte Liste aufräumen — [[tri-ich|Ich Selbst]] ➕ 2026-07-01\n"
+                    "- [ ] Freigabe geben — [[tri-ich|Ich Selbst]] ➕ 2026-11-10\n", encoding="utf-8", newline="\n")
+    rel = note.relative_to(_VAULT).as_posix()
+    heute = _date(2026, 11, 18)
+    eq(triage.anwenden(rel, 6, "Etwas ganz anderes", "parken", heute=heute)["ok"], False, "falscher Text an der Zeile:")
+    ok(triage.anwenden(rel, 6, "Dashboard erstellen", "uebergeben", "tri-bert", heute=heute)["ok"])
+    text = note.read_text(encoding="utf-8")
+    ok("- [ ] Dashboard erstellen — [[tri-bert|Bert Direkt]] ➕ 2026-11-10\n    - Übergeben von" in text
+       and "Triage 18.11.2026\n    - Beleg:" in text, f"Person wechselt, Vermerk steht darunter, der Beleg bleibt:\n{text}")
+    zeile = text.split("\n").index("- [ ] Alte Liste aufräumen — [[tri-ich|Ich Selbst]] ➕ 2026-07-01")
+    ok(triage.anwenden(rel, zeile, "Alte Liste aufräumen", "parken", heute=heute)["ok"])
+    text = note.read_text(encoding="utf-8")
+    ok("- [-] Alte Liste aufräumen" in text and "Geparkt am 18.11.2026" in text, "geparkt heisst [-] mit Vermerk")
+    zeile = text.split("\n").index("- [ ] Freigabe geben — [[tri-ich|Ich Selbst]] ➕ 2026-11-10")
+    vorher = text
+    ok(triage.anwenden(rel, zeile, "Freigabe geben", "selbst", heute=heute)["ok"])
+    eq(note.read_text(encoding="utf-8"), vorher, "selbst aendert die Notiz nicht:")
+    ok(any(v["als"] == "selbst" for v in triage.lade_zustand()["entschieden"].values()), "die Entscheidung ist gemerkt")
+    import aufgaben
+    offen = [t for t in aufgaben.tasks_in_text(note.read_text(encoding="utf-8"), "meeting") if t.is_open]
+    eq(len(offen), 2, "Vermerke sind keine eigenen Punkte, der geparkte ist nicht mehr offen:")
+
+
+# ───────────────────────────────────────── 12. Stand als Delta, Briefing, Lagebild, Altbestand
+
+def t_stand_delta_und_risiko_gruppen():
+    import stand
+    import aufgaben
+    from datetime import date as _date
+    heute = _date(2026, 9, 30)
+    events = [("2026-09-28", "STATUS", "Datenlieferung geht an das Data-Warehouse-Team"),
+              ("2026-09-02", "RISK", "Lager Nord: fehlende Reife der Prozessdefinition"),
+              ("2026-09-02", "RISK", "Lager Nord: mangelnde Kapazitaet am Teststandort"),
+              ("2026-09-02", "RISK", "Lager Nord: Testkit fehlt"),
+              ("2026-09-11", "RISK", "Zahlungsziele (Mail X, 11.09.2026): Zahlungsbedingungen nicht pflegbar"),
+              ("2026-09-22", "RISK", "Ausstehende Stammdaten fuer Artikel und Gefahrgut"),
+              ("2026-09-22", "RISK", "Ausstehende Stammdaten fuer Gefahrgut und Artikel fehlen weiter"),
+              ("2026-07-01", "RISK", "Altes Risiko ausserhalb des Fensters"),
+              ("2026-08-01", "DECISION", "Zu alt fuer Neu")]
+    g = stand.risiko_gruppen(events, heute)
+    eq(g[0], ("Lager Nord", 3), "Stichwort vor dem Doppelpunkt gruppiert:")
+    eq(sorted(n for _, n in g), [1, 2, 3], f"aehnlicher Wortlaut faellt zusammen, das alte Risiko zaehlt nicht: {g}")
+    ok(any(name == "Zahlungsziele" for name, _ in g), "die Klammer am Stichwort faellt weg")
+    eq(stand.neu_seit(events, heute), ["Datenlieferung geht an das Data-Warehouse-Team"], "neu sind die letzten 14 Tage, ohne Risiken:")
+
+    f = {"health": "red", "health_reasons": ["1 überfällige Aufgabe"], "open": 4, "overdue": 1, "questions": 0, "risks": 6,
+         "last_movement": "2026-09-28", "next_meeting": None, "altbestand": 0, "verantwortlich": "",
+         "neu": stand.neu_seit(events, heute), "risiko_gruppen": g,
+         "braucht_dich": {"anzahl": 2, "ueberfaellig": 1, "punkte": ["Vorhaben konsolidieren (bis 05.10.)", "Kontakte prüfen"]},
+         "rollen": ["[[a|A]] (Leitung)"], "beteiligte": ["[[b|B]]", "[[c|C]]"]}
+    block = stand.render_block(f, "Prosa bleibt.", heute)
+    ok("> **Neu (14 Tage):** Datenlieferung" in block and "> **Braucht dich:** 2 Punkt(e), 1 überfällig – Vorhaben" in block,
+       f"die Delta-Zeilen fehlen:\n{block}")
+    ok("**Risiken (30 Tage):** 6 in 3 Gruppen – Lager Nord (3)" in block, "Risiken stehen in Gruppen")
+    ok("> > [!info]- Beteiligte (3)\n> > **Rollen:**" in block, "wer beteiligt ist, steht eingeklappt")
+    eq(stand.existing_prose(stand.apply_block("# T\n\nText\n", block)), "Prosa bleibt.", "die Prosa laesst sich wieder lesen:")
+
+
+def t_briefing_ohne_schablone():
+    import briefing
+    basis = {"label": "Credit Check", "owners": ["@Anna"], "kind": "risk", "times_seen": 1, "overdue": False,
+             "age_days": 3, "first_seen": "2026-09-11", "deadline": "", "context": "Feld entfällt"}
+    eq(briefing.default_question(basis), "", "ein Risiko ohne Besonderheit bekommt keine Schablonenfrage:")
+    eq(briefing.default_question({**basis, "kind": "action"}), "", "auch kein 'Wie steht es um ...?':")
+    ok(briefing.default_question({**basis, "overdue": True}).startswith("Über die Frist"))
+    ok("Zum 3. Mal" in briefing.default_question({**basis, "times_seen": 3}))
+    eq(briefing.default_question({**basis, "kind": "question", "context": "Steht der Termin"}), "Steht der Termin?")
+    prio, why = briefing.classify({**basis, "age_days": 30, "stale": False}, {"health": "red"})
+    ok("Projekt auf rot" not in why and "als Risiko erfasst" not in why and "30 Tagen" in why,
+       f"die Begruendung nennt nur, was dieses Thema auszeichnet: {why}")
+    eq(briefing.classify({**basis, "stale": False}, {"health": "red"})[1], "als Risiko erfasst",
+       "ohne anderen Grund bleibt der eine:")
+    ok(briefing.MAX_TOPICS <= 6 and briefing.hoechstens() == briefing.MAX_TOPICS, "ein Briefing hat hoechstens sechs Themen")
+
+
+def t_lagebild_rechnet_die_bilder():
+    import lagebild
+    import organisation
+    import aufgaben
+    from datetime import date as _date
+    heute = _date(2026, 9, 30)
+    T = lambda owner, created, due=None, pruefen=False: aufgaben.Task(status=" ", text="x", owner=owner, created=created,   # noqa: E731
+                                                                      due=due, pruefen=pruefen)
+    z = lagebild.zusagen([T("a", "2026-09-25"), T("a", "2026-09-20"), T("a", "2026-09-10"), T("b", "2026-07-01"),
+                          T("b", "2026-07-11", due="2026-09-01"), T("ich", "2026-09-01"), T("c", "2026-06-01", pruefen=True)],
+                         "ich", heute)
+    eq([(r["person"], r["offen"], r["typisch"], r["ueberfaellig"]) for r in z], [("a", 3, 10, 0), ("b", 2, 86, 1)],
+       "je Person, ohne mich und ohne ungeprueften Altbestand:")
+    org = organisation.Organisation({s: {"name": s.upper(), "rolle": "", "team": "", "aktiv": True, "vorgesetzt": "", "quelle": ""}
+                                     for s in ("a", "b", "ich")})
+    tab = lagebild.zusagen_tabelle(z, org, "ich")
+    ok("**86 Tage**" in tab[3] and "**" not in tab[2].split("|")[4], f"fett ist nur, was typisch alt ist:\n{tab}")
+
+    themen = [{"slug": "a-b", "titel": "Ä-B (Bereich)", "ampel": "red", "offen": 20, "still": 30, "atlas": []},
+              {"slug": "klein", "titel": "Klein", "ampel": "green", "offen": 2, "still": 1, "atlas": []},
+              {"slug": "ohne", "titel": "Ohne Datum", "ampel": "", "offen": 9, "still": None, "atlas": []}]
+    r = lagebild.radar(themen)
+    ok(r[1] == "quadrantChart" and any(l.strip().startswith("Ae B Bereich 20: [0.67, 0.98] color: #E24B4A") for l in r),
+       f"Punkt mit sauberem Namen, Lage und Ampelfarbe:\n{r}")
+    ok(not any("Klein" in l or "Ohne Datum" in l for l in r), "zu wenig offen oder ohne Datum steht nicht im Radar")
+
+    kanon = {"kontexte": [{"id": "ctx-eingang", "name": "Eingang", "subdomain": "sd-edi"},
+                          {"id": "ctx-verteiler", "name": "Verteiler", "subdomain": "sd-order"},
+                          {"id": "ctx-ziel", "name": "Ziel", "subdomain": "sd-fremd"}],
+             "externe": [{"id": "ext-partner", "name": "Partnersystem (TMS)"}]}
+    th = {"edi": {"titel": "EDI", "ampel": "yellow", "offen": 1, "atlas": []},
+          "auftrag": {"titel": "Auftrag", "ampel": "red", "offen": 23, "atlas": ["sd-order"]},
+          "partnersystem-anbindung": {"titel": "Anbindung", "ampel": "green", "offen": 4, "atlas": []}}
+    eq([lagebild._thema_zu(k, kanon, th) for k in ("ctx-eingang", "ctx-verteiler", "ctx-ziel", "ext-partner")],
+       ["edi", "auftrag", "", "partnersystem-anbindung"], "Thema ueber Subdomaene, atlas_id oder den Namen des Externen:")
+    b = lagebild.ablauf_bild({"schritte": [{"kontext": "ext-partner"}, {"kontext": "ctx-eingang"}, {"kontext": "ctx-verteiler"},
+                                           {"kontext": "ctx-ziel"}]}, kanon, th)
+    bild = "\n".join(b)
+    ok('k0(["Partnersystem  TMS<br/>4 offen"])' in bild and "k0 --> k1" in bild and "k1 --> k2" in bild and "k2 --> k3" in bild
+       and "style k2 stroke:#E24B4A" in bild, f"Externe rund, Kanten in Reihenfolge, Ampel am Rahmen:\n{bild}")
+
+
+def t_altbestand_parkt_nur_alt_und_ohne_frist():
+    import altbestand
+    import aufgaben
+    from datetime import date as _date
+    d = _VAULT / "entities" / "projects"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "park-thema.md"
+    f.write_text("---\ntype: project\ntitle: Park-Thema\n---\n# Park-Thema\n\n## Offene Punkte\n"
+                 "- [ ] Bleibt, kein Altbestand ➕ 2026-06-01\n\n"
+                 f"{aufgaben.ALTBESTAND_HEADING}\n\n"
+                 "- [ ] Alt und ohne Frist ➕ 2026-07-01\n"
+                 "    - Beleg: „bleibt darunter stehen“\n"
+                 "- [ ] Alt, aber mit Frist 📅 2026-12-01 ➕ 2026-07-01\n"
+                 "- [ ] Frisch ➕ 2026-11-01\n\n## Event Log\n", encoding="utf-8", newline="\n")
+    heute = _date(2026, 11, 18)
+    v = altbestand.parken(today=heute)
+    eq((v["je_thema"].get("park-thema"), v["angewendet"]), (1, False), "Vorschau zaehlt nur alt und ohne Frist:")
+    ok("- [ ] Alt und ohne Frist" in f.read_text(encoding="utf-8"), "die Vorschau schreibt nichts")
+    altbestand.parken(anwenden=True, today=heute)
+    text = f.read_text(encoding="utf-8")
+    ok("- [-] Alt und ohne Frist ➕ 2026-07-01\n    - Geparkt am 18.11.2026 (Altbestand, ungeprüft, 140 Tage alt)" in text
+       and "    - Beleg: „bleibt darunter stehen“" in text, f"geparkt mit Vermerk, der Beleg bleibt:\n{text}")
+    ok("- [ ] Alt, aber mit Frist" in text and "- [ ] Frisch" in text and "- [ ] Bleibt, kein Altbestand" in text,
+       "mit Frist, frisch oder kein Altbestand bleibt offen")
+    eq(altbestand.parken(today=heute)["je_thema"].get("park-thema"), None, "ein zweiter Lauf findet nichts mehr:")
+
+
 # ───────────────────────────────────────── main
 
 TESTS = [
+    ("stand: Delta-Zeilen, Risiken in Gruppen, Beteiligte eingeklappt", t_stand_delta_und_risiko_gruppen),
+    ("briefing: keine Schablonenfrage, Begruendung ohne Wiederholung, hoechstens sechs", t_briefing_ohne_schablone),
+    ("lagebild: Zusagen je Person, Radar, Ablauf mit Ampel", t_lagebild_rechnet_die_bilder),
+    ("altbestand: parken nur alt und ohne Frist, mit Vermerk", t_altbestand_parkt_nur_alt_und_ohne_frist),
+    ("triage: Art, Atlas, anderer Handelnder, Linie, Fokus, Parken", t_triage_ordnet_ein),
+    ("triage: Matrix - Fachkreis nach Rolle, Teams und Runden", t_triage_matrix_und_gruppen),
+    ("triage: Bestaetigen schreibt an der Quelle (Person, Vermerk, [-]) oder merkt sich die Entscheidung",
+     t_triage_wendet_an_der_quelle_an),
+    ("organisation: Linie aus den Personenseiten, Vorrang, Verhaeltnis, Bild", t_organisation_liest_die_linie),
+    ("neuaufbau: nur in der Kopie, nie im Vault; aus Themen geht nur Abgeleitetes", t_neuaufbau_schuetzt_den_vault),
+    ("modell.fehler_einordnen: echte Meldungen bekommen Art, Ursache, Ausweg", t_fehler_einordnen_echte_meldungen),
+    ("modell.complete: gesperrtes Modell -> naechstes der Liste, nie eines ausserhalb",
+     t_complete_nimmt_naechstes_modell_der_liste),
+    ("modell.complete: ohne Ersatz traegt der Fehler Art und erlaubte Modelle", t_complete_ohne_ersatz_meldet_die_sperre),
+    ("modell.complete: ein Abbruch wird genau einmal wiederholt", t_complete_wiederholt_einen_abbruch_einmal),
+    ("modell.diagnose: haelt beim ersten Fehler, nennt Ursache und Ausweg", t_diagnose_haelt_beim_ersten_fehler),
+    ("modell.complete: Lease holt das gesperrte Modell, der Schluessel bleibt geheim", t_lease_holt_das_gesperrte_modell),
+    ("modell.lease: Ruhe nach Menschen, Laden abwarten, fremder Halter, Aufraeumen", t_lease_haelt_sich_an_den_vertrag),
+    ("nachbereiten_modell.extract: Art, Beleg, Zusammenfuehren, Raum ist keine Person",
+     t_extract_ordnet_ein_und_fuehrt_zusammen),
+    ("nachbereiten: Beleg steht als Unterpunkt, zaehlt nicht als Punkt", t_beleg_steht_als_unterpunkt),
+    ("nachbereiten_modell: Umschreibungen - das Modell waehlt Nummern, der Code prueft",
+     t_gruppen_zusammenfuehren_prueft_die_wahl_des_modells),
+    ("nachbereiten_modell.extract: ausgefallene Pruefstufe steht mit Ursache im Ergebnis",
+     t_ausgefallene_pruefung_steht_im_ergebnis),
     ("modell.config(): Env > llm.config.json > Vorgabe", t_config_precedence),
     ("modell.available(): unerreichbar wirft nie", t_available_unreachable_no_throw),
     ("modell.available(): VAULT_LLM_OFFLINE=1 erzwingt False", t_available_offline_env),

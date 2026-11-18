@@ -1,8 +1,10 @@
 // Das Plugin: Ansichten, Befehle, Zustand. Lesen, Erfassen und Chat rechnet es selbst (src/core);
 // fuer alles andere startet es am Desktop die Python-Engine (src/desktop).
 import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf, debounce, normalizePath, requestUrl } from "obsidian";
-import { CaptureResult as CoreCaptureResult, Wartend, anwenden, capturable, vormerken } from "./core/nacherfassen";
+import { CaptureResult as CoreCaptureResult, Wartend, anwenden, capturable, fmUpdate, vormerken } from "./core/nacherfassen";
 import { IN_ARBEIT, NACHZIEHEN, Nachziehen, inArbeit, nachziehenOffen, schreibweg } from "./core/inarbeit";
+import { AutoErgebnis, DiagnoseSchritt, LETZTER_LAUF, LetzterLauf, auswerten, gescheitert, letzterLauf, neueFehler, schrittName, zeitText } from "./core/automatik";
+import { DauerIndex, EVENTS_JSON, SPIEGEL, TerminZeit, dauerFuer, dauerIndex } from "./core/fokus";
 import { stem } from "./core/quelle";
 import { ChatAnswer, ChatRequest, Fortschritt, ask } from "./core/chat";
 import { localIsoDate } from "./core/datum";
@@ -11,7 +13,7 @@ import { HttpPost, complete, completeTools, stripThink } from "./core/modell";
 import type { MeetingInfo, RiskRow, TaskInfo } from "./core/ansicht";
 import { RISK_WINDOW_DAYS, riskRows } from "./core/risiken";
 import { SKILL_DIR, SkillRecipe, parseSkills } from "./core/rezepte";
-import { CompleteResult, completable, completeInText, isOpen, scanTasks } from "./core/aufgaben";
+import { CompleteResult, TOPIC_SECTION, appendToSection, completable, completeInText, isOpen, scanTasks } from "./core/aufgaben";
 import { VaultIndex } from "./core/vaultIndex";
 import { withoutAssigned } from "./core/themen";
 import type { DesktopServices, Likec4Paths, PythonInfo } from "./desktop";
@@ -20,6 +22,12 @@ import { ObsidianSource } from "./obsidianSource";
 import { DEFAULT_SETTINGS, SecondBrainSettingTab, SecondBrainSettings, Spiegel } from "./einstellungen";
 import { CAL_CONFIG, Json, LLM_CONFIG, LOCAL_CONFIG, readConfig, updateConfig } from "./konfiguration";
 import { CaptureModal, WrapupResultModal } from "./views/nacherfassen";
+import { AutomatikModal } from "./views/automatik";
+import { NeuaufbauModal } from "./views/neuaufbau";
+import { TriageModal } from "./views/triage";
+import { TriageErgebnis, TriagePunkt, Vorschlag, anwendenArgs } from "./core/triage";
+import { NeuaufbauErgebnis, NeuaufbauStand, neuaufbauMeldung } from "./core/neuaufbau";
+import { FokusAenderung, FokusModal } from "./views/fokus";
 import { ChatState, ChatView, VIEW_TYPE_CHAT, newChatState } from "./views/chat";
 import { AnleitungView, VIEW_TYPE_ANLEITUNG } from "./views/anleitung";
 import { COCKPIT_BLOCK, CockpitBlock } from "./views/cockpit";
@@ -41,12 +49,10 @@ export interface OpenSeries {
   vorschlaege: TopicSuggestion[];
 }
 
-interface AutoStep { step: string; ok: boolean; skipped?: boolean; detail?: string; changed?: number }
 /** `2ndbrain einrichten --json` */
 export interface EinrichtenErgebnis { ok: boolean; schritte: { ok: boolean; schritt: string; text: string }[]; mcp?: string }
 /** Engine: installiert, passende Version? */
 export interface EngineStatus { state: "unbekannt" | "fehlt" | "abweichend" | "ok"; version: string | null; text: string }
-interface AutoResult { ok: boolean; llm?: boolean; seconds?: number; skipped?: string; steps: AutoStep[] }
 /** `wartet`: der Termin wird gerade nachbereitet - die Aenderung ist vorgemerkt und kommt danach dazu. */
 export interface CaptureResult { ok: boolean; grund?: string; geaendert?: boolean; aktion?: string; note?: string; wartet?: boolean }
 export interface UndoInfo {
@@ -71,6 +77,7 @@ const MAX_FINISHED_JOBS = 5;
 const ENGINE_REPO = "https://github.com/mdopp/2ndbrain";
 // Kalender-Adresse im Obsidian-Schluesselbund (je Geraet, nicht in data.json, nicht im Vault-Ordner)
 const CAL_SECRET = "2ndbrain-kalender-url";
+const MODEL_SECRET = "2ndbrain-modell-schluessel";
 // Sperre der Automatik (auto.py): solange sie laeuft, schreibt das Plugin keine Termin-/Themen-Dateien.
 // Nur am Desktop - am Handy laeuft keine Engine, dort fuehrt der Sync zusammen.
 const AUTO_LOCK = ".2ndbrain/daten/.auto.lock";
@@ -87,7 +94,7 @@ export default class SecondBrainPlugin extends Plugin {
   tasks: TaskInfo[] = [];
   llmState = { ok: false, detail: "noch nicht geprüft" };
   llmModels: string[] = [];          // was der Server unter /v1/models anbietet (Auswahl in den Einstellungen)
-  lastAuto: { at: Date; result: AutoResult | null } | null = null;
+  lastAuto: LetzterLauf | null = null;   // eigener Lauf oder .2ndbrain/daten/auto_letzter_lauf.json, der neuere
   nachziehen: Nachziehen[] = [];     // alte Notizen, die die Automatik nach einem Update nachzieht (offen)
   jobs: WrapupJob[] = [];
   openTopics: OpenSeries[] = [];
@@ -117,6 +124,9 @@ export default class SecondBrainPlugin extends Plugin {
   // Wissensgraph fuer die Werkzeuge des Chats - gebaut bei der ersten Frage, die ihn braucht, und nach
   // jeder Aenderung im Vault verworfen (neu gebaut erst bei der naechsten Frage)
   private graphCache: Promise<Graph> | null = null;
+  // Dauer der Kalendertermine (archive/calendar/events.json) fuer „wohin ging meine Zeit“ - neu gelesen nach
+  // jedem Lauf der Automatik, sonst hoechstens alle zehn Minuten (Heute zeichnet oft)
+  private dauerCache: { at: number; idx: DauerIndex } | null = null;
 
   /** Python-Engine (Desktop) - am Handy eine, die "nur am Desktop" antwortet. */
   get engine(): EngineApi {
@@ -188,6 +198,7 @@ export default class SecondBrainPlugin extends Plugin {
     if (!this.desktop) return;
     if (this.settings.wartend.length) void this.wartendAbarbeiten();   // vorgemerkt vor dem Neustart
     await this.nachziehenLesen();
+    if (await this.letztenLaufLesen()) await this.refreshViews();      // „mit Fehlern“ auch nach dem Neustart
     await this.resolvePython();
     await this.refreshEngine();
     if (this.engineStatus.state === "fehlt") {
@@ -315,6 +326,53 @@ export default class SecondBrainPlugin extends Plugin {
     return r;
   }
 
+  /** `2ndbrain triage`: meine offenen Punkte eingeordnet, die fuer diese Woche (Desktop - die Engine rechnet). */
+  async triage(): Promise<TriageErgebnis | null> {
+    if (!this.desktop) return null;
+    return this.engine.json<TriageErgebnis>(["triage", "--json"], { timeoutMs: 5 * 60_000 });
+  }
+
+  /** Eine Entscheidung der Triage an der Quelle des Punkts festhalten, danach die Ansichten neu zeichnen. */
+  async triageAnwenden(p: TriagePunkt, als: Vorschlag): Promise<{ ok: boolean; grund?: string } | null> {
+    if (!this.desktop) return null;
+    const r = await this.engine.json<{ ok: boolean; grund?: string }>(anwendenArgs(p, als), { timeoutMs: 60_000 });
+    await this.refreshViews();
+    return r;
+  }
+
+  /** Rechnet gerade ein Neuaufbau (in diesem Obsidian gestartet)? */
+  neuaufbauLaeuft = false;
+
+  /** `2ndbrain neuaufbau stand`: der juengste Neuaufbau neben dem Vault. */
+  async neuaufbauStand(): Promise<NeuaufbauStand | null> {
+    if (!this.desktop) return null;
+    return this.engine.json<NeuaufbauStand>(["neuaufbau", "stand", "--json"], { timeoutMs: 60_000 });
+  }
+
+  /** `2ndbrain neuaufbau`: alles neu aufbauen - in einer Kopie neben dem Vault, dieser bleibt unveraendert.
+   *  Laeuft in der Warteschlange der Engine (Stunden): solange wartet die Automatik; ein Abbruch laesst sich
+   *  mit demselben Befehl fortsetzen. */
+  async neuaufbauStarten(): Promise<void> {
+    if (!this.desktop || this.neuaufbauLaeuft) return;
+    this.neuaufbauLaeuft = true;
+    new Notice("2ndBrain: Neuaufbau gestartet – in einer Kopie neben dem Vault. Das dauert; der Stand steht unter "
+      + "„Alles neu aufbauen“.", 15_000);
+    try {
+      const r = await this.engine.json<NeuaufbauErgebnis>(["neuaufbau", "alles", "--json"], { timeoutMs: 24 * 3600_000 });
+      new Notice(`2ndBrain: ${neuaufbauMeldung(r)}`, 0);
+    } finally {
+      this.neuaufbauLaeuft = false;
+    }
+  }
+
+  /** `2ndbrain modell --diagnose`: die Verbindung zum Modell Schritt fuer Schritt, mit Ursache und Ausweg. */
+  async modellDiagnose(): Promise<DiagnoseSchritt[] | null> {
+    if (!this.desktop) return null;
+    const r = await this.engine.json<{ ok: boolean; schritte: DiagnoseSchritt[] }>(
+      ["modell", "--diagnose", "--json"], { timeoutMs: 5 * 60_000 });
+    return r && Array.isArray(r.schritte) ? r.schritte : null;
+  }
+
   /** Termine/Reihen der naechsten 14 Tage ohne Thema (fuer "Nacharbeit") - Desktop. */
   async refreshOpenTopics(): Promise<void> {
     if (!this.desktop) return;
@@ -328,6 +386,8 @@ export default class SecondBrainPlugin extends Plugin {
     this.addCommand({ id: "open-chat", name: "Fragen an den Vault (Chat)", callback: () => void this.activateChat() });
     this.addCommand({ id: "quick-look", name: "Sofortsuche: Thema oder Person", callback: () => this.openQuickLook() });
     this.addCommand({ id: "open-help", name: "Anleitung: so funktioniert 2ndBrain", callback: () => void this.openHelp() });
+    this.addCommand({ id: "fokus-planen", name: "Fokus planen", callback: () => this.openFokus() });
+    this.addCommand({ id: "fokus-spiegel", name: "Fokus-Spiegel öffnen", callback: () => void this.openSpiegel() });
     this.addCommand({
       id: "wrapup-note", name: "Diesen Termin nacherfassen / nachbereiten",
       checkCallback: (checking) => {
@@ -339,6 +399,13 @@ export default class SecondBrainPlugin extends Plugin {
     });
     if (!this.desktop) return;
     this.addCommand({ id: "run-automatik", name: "Automatik jetzt ausführen", callback: () => void this.runAutomatik(true) });
+    this.addCommand({ id: "automatik-letzter-lauf", name: "Automatik: letzter Lauf (Schritte und Fehler)",
+                      callback: () => void this.openAutomatikBericht() });
+    this.addCommand({ id: "fokus-spiegel-neu", name: "Fokus-Spiegel jetzt erstellen", callback: () => void this.spiegelNeu() });
+    this.addCommand({ id: "triage", name: "Meine Woche: offene Punkte einordnen (Triage)",
+                      callback: () => new TriageModal(this.app, this).open() });
+    this.addCommand({ id: "neuaufbau", name: "Alles neu aufbauen (in einer Kopie neben dem Vault)",
+                      callback: () => new NeuaufbauModal(this.app, this).open() });
     this.addCommand({ id: "open-system-overview", name: "Systemübersicht öffnen (LikeC4)",
                       callback: () => void this.openSystemOverview() });
     this.addCommand({
@@ -646,7 +713,7 @@ export default class SecondBrainPlugin extends Plugin {
   private updateStatus(): void {
     if (!this.statusEl) return;
     const dot = this.llmState.ok ? "●" : "○";
-    const auto = this.lastAuto ? ` · Auto ${this.lastAuto.at.toTimeString().slice(0, 5)}` : "";
+    const auto = this.lastAuto ? ` · Auto ${zeitText(this.lastAuto.at)}` : "";
     const running = this.jobs.filter((j) => j.state === "wartet" || j.state === "läuft").length;
     const busy = running ? ` · Nachbereitung läuft (${running})` : this.engine.busy ? " · läuft …" : "";
     this.statusEl.setText(`2ndBrain ${dot}${auto}${busy}`);
@@ -691,10 +758,26 @@ export default class SecondBrainPlugin extends Plugin {
     return true;
   }
 
-  /** Umgebung fuer jeden Engine-Lauf: die Kalender-Adresse aus dem Schluesselbund. */
+  /** Modell-Schluessel aus dem Obsidian-Schluesselbund ("" = keiner): damit fordert die Engine ein gesperrtes
+   *  Modell an (Lease). Nie anzeigen, nie loggen. */
+  modelKey(): string {
+    try {
+      return this.app.secretStorage?.getSecret(MODEL_SECRET)?.trim() ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Modell-Schluessel im Schluesselbund setzen ("" = entfernen). */
+  setModelKey(key: string): void {
+    this.app.secretStorage?.setSecret(MODEL_SECRET, key.trim());
+  }
+
+  /** Umgebung fuer jeden Engine-Lauf: Kalender-Adresse und Modell-Schluessel aus dem Schluesselbund. */
   private engineEnv(): Record<string, string> {
     const url = this.calendarSecret();
-    return url ? { VAULT_CALENDAR_URL: url } : {};
+    const key = this.modelKey();
+    return { ...(url ? { VAULT_CALENDAR_URL: url } : {}), ...(key ? { VAULT_LLM_KEY: key } : {}) };
   }
 
   async readVaultConfig(path: string): Promise<Json | null> {
@@ -734,17 +817,21 @@ export default class SecondBrainPlugin extends Plugin {
     }
     if (manual) new Notice("2ndBrain: Automatik läuft …");
     this.updateStatus();
-    const result = await this.engine.json<AutoResult>(["auto", "--json"]);
-    this.lastAuto = { at: new Date(), result };
+    // ohne JSON (Absturz beim Start, fehlendes Paket): die letzten Zeilen der Engine fuer „Details“
+    const { result, ausgabe } = auswerten(await this.engine.run(["auto", "--json"]));
+    this.dauerCache = null;                 // der Kalender kann neu sein
+    const vorher = this.lastAuto;
+    if (!result?.skipped) this.lastAuto = { at: new Date(), result, ausgabe };   // „laeuft bereits“ sagt nichts
     await this.nachziehenLesen();
-    const changed = (result?.steps ?? []).filter((s) => (s.changed ?? 0) > 0 && !s.skipped);
-    if (!result) {
-      new Notice("2ndBrain: Automatik lieferte kein Ergebnis – Python/Engine prüfen.");
-    } else if (manual || changed.length) {
-      const text = changed.length
-        ? changed.map((s) => `${s.step}: ${s.detail ?? ""}`).join("\n")
-        : result.skipped ?? "keine Änderungen";
-      new Notice(`2ndBrain Automatik\n${text}`, 8000);
+    const fehler = gescheitert(result);
+    const zeilen = (result?.steps ?? []).filter((s) => (s.changed ?? 0) > 0 && !s.skipped)
+      .map((s) => `${schrittName(s.step)}: ${s.detail ?? ""}`);
+    if ((!result || fehler.length) && (manual || neueFehler(vorher, result))) {
+      this.automatikMeldung(result ? `${fehler.length === 1 ? "1 Schritt" : `${fehler.length} Schritte`} gescheitert: `
+                                     + fehler.map((s) => schrittName(s.step)).join(", ")
+                                   : "Die Engine hat kein Ergebnis geliefert.", zeilen);
+    } else if (result && (manual || zeilen.length)) {
+      new Notice(`2ndBrain Automatik\n${zeilen.length ? zeilen.join("\n") : result.skipped ?? "keine Änderungen"}`, 8000);
     }
     await this.refreshTasks();
     await this.refreshOpenTopics();
@@ -752,6 +839,123 @@ export default class SecondBrainPlugin extends Plugin {
       await this.loadRisks();
       await this.refreshViews();
     }
+  }
+
+  /** Meldung nach einem Lauf mit Fehlern - „Details“ oeffnet den letzten Lauf. */
+  private automatikMeldung(kopf: string, zeilen: string[]): void {
+    new Notice(createFragment((f) => {
+      f.createDiv({ text: `2ndBrain Automatik – ${kopf}` });
+      for (const z of zeilen) f.createDiv({ text: z });
+      const a = f.createEl("a", { text: "Details", href: "#" });
+      a.onclick = (e) => {
+        e.preventDefault();
+        void this.openAutomatikBericht();
+      };
+    }), 15_000);
+  }
+
+  /** Fenster „Automatik – letzter Lauf“ (Heute: „mit Fehlern“, Befehl, „Details“ in der Meldung). */
+  async openAutomatikBericht(): Promise<void> {
+    if (await this.letztenLaufLesen()) void this.refreshViews();
+    new AutomatikModal(this.app, this).open();
+  }
+
+  /** Den letzten vollen Lauf aus der Datei der Engine (engine/secondbrain/auto.py) - nach einem Neustart und fuer
+   *  Laeufe aus der Aufgabenplanung. Nur wenn er neuer ist als der bekannte; true = uebernommen. */
+  private async letztenLaufLesen(): Promise<boolean> {
+    if (!this.desktop) return false;
+    const adapter = this.app.vault.adapter;
+    try {
+      const r = letzterLauf((await adapter.exists(LETZTER_LAUF)) ? await adapter.read(LETZTER_LAUF) : null);
+      const am = r?.am ? new Date(r.am) : null;
+      if (!r || !am || Number.isNaN(am.getTime()) || (this.lastAuto && am <= this.lastAuto.at)) return false;
+      this.lastAuto = { at: am, result: r };
+      return true;
+    } catch {
+      return false;                        // keine oder unlesbare Datei: es bleibt beim Bekannten
+    }
+  }
+
+  // ------------------------------------------------------------------ Fokus
+
+  /** Fenster „Fokus planen“ (views/fokus.ts) - am Desktop und am Handy. */
+  openFokus(): void {
+    new FokusModal(this.app, this).open();
+  }
+
+  /** Was „Fokus planen“ geaendert hat, in die Themen schreiben: Frontmatter zeilengenau, der Schritt als Punkt in
+   *  `## Offene Punkte` (core/aufgaben.ts). Wie jede Aenderung ueber `schreiben` - laeuft die Engine, sofort. */
+  async fokusSpeichern(changes: FokusAenderung[]): Promise<{ schritte: number; fehler: string[] }> {
+    let schritte = 0;
+    const fehler: string[] = [];
+    for (const c of changes) {
+      const file = this.app.vault.getAbstractFileByPath(c.path);
+      if (!(file instanceof TFile)) {
+        fehler.push(c.titel);
+        continue;
+      }
+      let added = 0;
+      try {
+        const weg = await this.schreiben(file, (text) => {
+          let t = Object.keys(c.updates).length ? fmUpdate(text, c.updates) : text;
+          if (c.schritt) {
+            const r = appendToSection(t, TOPIC_SECTION, [c.schritt]);
+            t = r.text;
+            added = r.added;
+          }
+          return t;
+        });
+        if (weg === "warten") fehler.push(`${c.titel} (wird gerade bearbeitet – gleich noch einmal)`);
+        else schritte += added;
+      } catch (e) {
+        fehler.push(`${c.titel} (${String(e)})`);
+      }
+    }
+    await this.refreshTasks();
+    return { schritte, fehler };
+  }
+
+  /** Termin-Notizen im Zeitraum mit ihrer Dauer aus dem Kalender (core/fokus.ts). */
+  async termineMitDauer(von: string, bis: string): Promise<TerminZeit[]> {
+    if (!this.dauerCache || Date.now() - this.dauerCache.at > 10 * 60_000) {
+      this.dauerCache = { at: Date.now(), idx: dauerIndex(await this.source.readFile(EVENTS_JSON)) };
+    }
+    const idx = this.dauerCache.idx;
+    return this.index.termine(von, bis).map((t) => ({ ...t, minuten: dauerFuer(t, idx) }));
+  }
+
+  /** reports/fokus-spiegel.md (die Engine schreibt ihn montags; `fokus.py`). */
+  async openSpiegel(): Promise<void> {
+    if (this.app.vault.getAbstractFileByPath(SPIEGEL)) {
+      await this.app.workspace.openLinkText(SPIEGEL, "", false);
+    } else if (this.desktop) {
+      new Notice("Noch kein Fokus-Spiegel – die Automatik schreibt ihn montags. „Fokus-Spiegel jetzt erstellen“ geht sofort.");
+    } else {
+      new Notice("Noch kein Fokus-Spiegel – den schreibt die Automatik am Desktop montags.");
+    }
+  }
+
+  /** Fokus-Spiegel sofort (neu) schreiben lassen - mit Einordnung, wenn das Modell da ist. */
+  async spiegelNeu(): Promise<void> {
+    if (!this.desktop) return;
+    new Notice("2ndBrain: Fokus-Spiegel wird erstellt …");
+    const r = await this.engine.json<{ ok: boolean; detail?: string; pfad?: string }>(
+      ["fokus", "--spiegel", "--neu", "--json"], { timeoutMs: 10 * 60_000 });
+    if (!r?.ok) {
+      new Notice("Fokus-Spiegel nicht erstellt – „Automatik: letzter Lauf“ oder das Terminal (`2ndbrain fokus --spiegel`) zeigt, warum.");
+      return;
+    }
+    new Notice(`Fokus-Spiegel: ${r.detail ?? "fertig"}`);
+    if (r.pfad) await this.app.workspace.openLinkText(r.pfad, "", false);
+  }
+
+  /** Wo der Lauf war - fuer den Bericht zum Weitergeben. */
+  umgebungText(): string {
+    const system = Platform.isMacOS ? "macOS" : Platform.isWin ? "Windows" : Platform.isLinux ? "Linux" : "Handy";
+    const engine = this.engineStatus.version ? ` · Engine ${this.engineStatus.version}`
+      + (this.engineQuelltext ? " (Quelltext)" : "") : "";
+    const py = this.pythonInfo ? ` · Python ${this.pythonInfo.version}` : "";
+    return `Plugin ${this.manifest.version} · ${system}${engine}${py}`;
   }
 
   // ------------------------------------------------ Nacherfassen / Nachbereiten
@@ -914,7 +1118,7 @@ export default class SecondBrainPlugin extends Plugin {
   /** Nachbereitung dieses Termins (Modell, Sync ins Themen-Log, Stand). Rueckgabe: Kurztext. */
   async wrapupNow(path: string, onStart?: () => void): Promise<string> {
     if (!this.desktop) return NUR_DESKTOP;
-    const r = await this.engine.json<AutoResult>(
+    const r = await this.engine.json<AutoErgebnis>(
       ["auto", "--only", "nachbereiten,themenlog,stand", "--force", "--note", path, "--json"], { onStart });
     await this.refreshTasks();
     const w = r?.steps.find((s) => s.step === "nachbereiten");

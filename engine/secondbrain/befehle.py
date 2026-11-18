@@ -49,6 +49,8 @@ GRUPPEN = [
         ("stand", "stand", [], "Stand-Block je Thema (--topic <slug> --force --no-llm --dry-run --json)"),
         ("verdichten", "verdichten", [], "Themen schlank halten (Vorschau reports/verdichten.md; --apply)"),
         ("nachfuellen", "nachfuellen", [], "leere Notizen aus Anhaengen nachfuellen (pypdf, Texterkennung, kein Modell)"),
+        ("neuaufbau", "neuaufbau", [], "alles neu aufbauen - in einer Kopie neben dem Vault, mit Vergleich vorher/nachher\n"
+                                        "(anlegen [--ziel P] | zuruecksetzen | bauen [--max N] | vergleichen | stand)"),
     ]),
     ("Wissen", [
         ("wissen", "wissen", [], "Begriffs-Index, Kontext-Verzeichnis, Glossar nachziehen - nur was sich\n"
@@ -69,7 +71,11 @@ GRUPPEN = [
         ("playbooks", "playbook", [], "Termin-Typen aus entities/meeting-playbooks/ auflisten"),
         ("reihen", "reihen", [], "Reihen (Gremien, Formate) auflisten (--derive schlaegt sie aus Terminen vor)"),
         ("beteiligte", "beteiligte", [], "Beteiligte je Thema berechnen (--topic --json)"),
+        ("fokus", "fokus", [], "Fokus-Themen mit Zahlen der letzten 7 Tage (--json);\n"
+                               "--spiegel [--neu]: Fokus-Spiegel dieser Woche nach reports/fokus-spiegel.md"),
         ("personen", "personen", [], "Ueberblick je Person erzeugen (--dry-run | --slug <person> | --json)"),
+        ("orgchart", "organisation", [], "Organisation: reports/orgchart.md mit Bild der eigenen Linie und Pflegeliste\n"
+                                         "(--person <slug>: Linie und Verhaeltnis zu mir | --json | --dry-run)"),
         ("thema-neu", "thema_anlegen", [], "\"<Name>\" [--keywords a,b]: Themen-Seite anlegen"),
         ("person-neu", "anlegen", ["people"], "\"<Name>\" [--aliases A,B] [--role \"...\"]: Person anlegen"),
         ("team-neu", "anlegen", ["teams"], "\"<Name>\": Team anlegen"),
@@ -80,6 +86,10 @@ GRUPPEN = [
     ]),
     ("Lesen - das Plugin rechnet selbst; diese Fassungen dienen dem Terminal", [
         ("aufgaben", "aufgaben", [], "offene Punkte (--open --owner <slug> --topic <slug> --json | --summary)"),
+        ("lagebild", "lagebild", [], "reports/lagebild.md: Zusagen je Person mit Alter, Themen-Radar, Ablaeufe mit Stand\n"
+                                      "(--dry-run | --json)"),
+        ("triage", "triage", [], "meine offenen Punkte einordnen: selbst, uebergeben, nachfassen, Atlas, parken\n"
+                                  "(--alle | --json | --ohne-modell | --anwenden PFAD --line N --text T --als ... [--an SLUG])"),
         ("risiken", "ampel", [], "Risiken aus dem Themen-Log (JSON)"),
         ("frage", "frage", [], "Frage-Modus des Chats (Offene Fragen), JSON von stdin"),
     ]),
@@ -89,7 +99,7 @@ GRUPPEN = [
         ("pfade", "einrichten", ["--pfade"], "Pfade, likec4-Befehl, Python und Version als JSON (fuer das Plugin)"),
         ("version", None, [], "Version der Engine (--json)"),
         ("mcp", None, [], "MCP-Server fuer Claude (stdio; --selftest)"),
-        ("modell", "modell", [], "Modell-Server pruefen (--selftest | --config)"),
+        ("modell", "modell", [], "Modell-Server pruefen (--selftest | --diagnose [--json] | --config)"),
         ("selbsttest", "selbsttest", [], "Verdrahtung, Konventionen, Daten pruefen"),
     ]),
     ("Entwickeln (nur mit dem Code-Repo, `pip install -e engine`)", [

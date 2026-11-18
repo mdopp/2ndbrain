@@ -33,17 +33,69 @@ Von oben nach unten – in der Reihenfolge, in der man es braucht:
 
 | Abschnitt | Was du siehst | Was du tust |
 |---|---|---|
-| Kopfzeile | Datum, „Modell bereit“, letzter Lauf der Automatik | ⟳ Automatik jetzt · 🔍 Sofortsuche (Thema oder Person) · **?** diese Anleitung |
+| Kopfzeile | Datum, „Modell bereit“, letzter Lauf der Automatik (rot: „mit Fehlern“) | ⟳ Automatik jetzt · 🔍 Sofortsuche (Thema oder Person) · **?** diese Anleitung · Klick auf „Automatik …“: was der letzte Lauf getan hat und was schiefging |
 | Nachbereitungen | was gerade im Hintergrund nachbereitet wird oder fertig ist | „Ergebnis“ ansehen, bei Bedarf zurücknehmen |
+| **Fokus** | deine Fokus-Themen nach Rang: Ampel, Ziel und Zieltermin, dein nächster Schritt, Termine und Stunden der letzten 14 Tage, Warnungen; darunter, wohin deine Zeit ging | „Planen“ (Themen, Reihenfolge, Ziel, nächster Schritt) · „Spiegel“ (Wochenrückblick) – siehe unten |
 | **Ohne Notizen** | vergangene Termine ohne jede Notiz | ✏️ nachtragen oder ⏭ überspringen. Diese Liste soll leer sein: Ohne Notizen gibt es keine Nachbereitung und keine Fragen. |
 | Themen-Radar | Themen mit 🔴 oder 🟡 und dem Grund | Thema öffnen; „Radar“ zeigt alle |
 | Meine Aufgaben | deine offenen Punkte, Überfälliges zuerst | direkt hier abhaken; „Alle“ öffnet [[01_Aufgaben]] |
-| Termine heute / am nächsten Tag | Uhrzeit, Titel, Phase, Themen mit Ampel, offene Punkte zum Nachfassen | ✏️ Notizen, „Thema wählen“, „Mit wem?“ bei 1:1 |
+| Termine heute / am nächsten Tag | Uhrzeit, Titel, Phase, Themen mit Ampel, offene Punkte zum Nachfassen; ★ = zahlt auf einen Fokus ein | ✏️ Notizen, „Thema wählen“, „Mit wem?“ bei 1:1 |
 | Nacharbeit (zugeklappt) | Termine ohne Thema (nächste 14 Tage); Termine mit Notizen, die noch nicht nachbereitet sind | Vorschlag übernehmen (→ Thema), 🏷 Thema wählen, ⊘ kein Thema nötig; ✏️ nachbereiten |
 
 Die **Phase** eines Termins steht als kleines Etikett daneben: *Notizen fehlen*, *nachbereiten*,
 *nachbereitet*, *entfallen*, *übersprungen* – oder *vorgemerkt*, wenn am Handy zum Nachbereiten
 vorgemerkt wurde.
+
+**Wenn die Automatik „mit Fehlern“ meldet:** Klick darauf (oder Befehl „Automatik: letzter Lauf“). Das
+Fenster zeigt oben jeden gescheiterten Schritt mit der ganzen Meldung und – für bekannte Fälle – was zu
+tun ist, etwa „Kalender-Adresse auf diesem Gerät eintragen“. Bei einem unerwarteten Fehler steht darunter
+aufklappbar die Stelle im Code. Danach folgen die übrigen Schritte mit Ergebnis und Dauer.
+**„Bericht kopieren“** legt alles als Text in die Zwischenablage, zum Weitergeben, ohne die
+Kalender-Adresse. **„Noch einmal laufen lassen“** startet die Automatik neu. Steht dort „ohne Ergebnis“,
+ist die Engine schon beim Start gescheitert; dann zeigt das Fenster ihre letzten Zeilen. Der letzte Lauf
+bleibt über einen Neustart erhalten (`.2ndbrain/daten/auto_letzter_lauf.json`), auch wenn ihn die
+Aufgabenplanung gestartet hat. Ein Lauf im Hintergrund meldet sich nur, wenn etwas neu scheitert, mit
+„Details“ zum selben Fenster.
+
+## Fokus: das Richtige voranbringen
+
+Nicht jedes Thema ist gleich wichtig. Wähle drei bis fünf **Fokus-Themen** – die, die du wirklich
+voranbringen willst – und lass dich daran messen.
+
+1. **Planen** – in „Heute“ beim Abschnitt *Fokus* (oder Befehl „Fokus planen“): Themen suchen und
+   hinzufügen, mit ↑ ↓ in die Reihenfolge ihrer Wichtigkeit bringen. Je Thema:
+   - **Ziel:** ein Satz – woran merkst du, dass es geschafft ist?
+   - **Zieltermin**
+   - **Nächster Schritt:** was du als Nächstes tust, mit Frist. Der Schritt wird eine normale Aufgabe
+     im Thema; er steht dann auch in „Meine Aufgaben“.
+
+   Ein Thema mit Unterthemen ist ein **Nordstern**: Was in den Unterthemen passiert, zählt mit.
+2. **Jeden Tag** zeigt „Heute“ ganz oben je Fokus-Thema:
+   - Ampel, Ziel und die Tage bis zum Zieltermin
+   - deinen nächsten Schritt
+   - Termine und Stunden der letzten 14 Tage
+   - Warnungen bei fehlendem nächstem Schritt, 14 Tagen ohne Bewegung im Log, keinem Termin in den
+     nächsten zwei Wochen, überschrittenem Zieltermin oder fehlendem Ziel
+
+   Darunter steht, wohin deine Zeit ging: *Fokus · andere Themen · ohne Thema*. Termine und Aufgaben zu
+   einem Fokus-Thema tragen einen ★.
+3. **Jede Woche** schreibt die Automatik montags den **Fokus-Spiegel** (`reports/fokus-spiegel.md`,
+   „Spiegel“ in „Heute“). Darin stehen je Fokus:
+   - was sich bewegt hat und was nicht
+   - Termine und Schritte
+   - die Termine der kommenden Woche, dazu eine Liste der Termine ohne Fokus-Bezug
+
+   Die Zahlen rechnet der Code. Das Modell ordnet nur ein und stellt dir je Thema eine Frage, etwa
+   welche Runde du abgeben könntest. Ist es aus, steht der Spiegel erst mit den Zahlen da und wird mit
+   Einordnung neu geschrieben, sobald es erreichbar ist. „Fokus-Spiegel jetzt erstellen“ geht sofort.
+4. **Vor dem Termin**: Gehört ein Termin zu einem Fokus-Thema, steht in seiner Vorbereitung das Ziel mit
+   deinem nächsten Schritt, dazu die Frage, was dieser Termin dafür bringen soll.
+5. **Im Chat**: „Tue ich das Richtige?“, „Wie stehen meine Fokus-Themen?“ oder „Wohin geht meine Zeit?“ –
+   die Antwort nutzt dieselben Zahlen.
+
+Zeit zählt nur, was einem Thema zugeordnet ist. Termine ohne Thema erscheinen als „ohne Thema“, nicht
+als Fokus. Die Dauer kommt aus dem Kalender. Solange sie fehlt, etwa direkt nach dem Update vor dem
+nächsten Kalender-Abruf, zählt die Anzahl der Termine.
 
 ## Der Weg eines Termins
 
@@ -183,6 +235,55 @@ Begriff auf, der im Kanon fehlt, schlägt 2ndBrain eine Erweiterung vor – als 
   „Nachfassen“. Bei einem Termin mit der Person stehen sie direkt am Termin.
 - Abhaken geht in „Heute“, in der Aufgabenliste oder in der Notiz selbst.
 - [[05_Risiken]] – Risiken aus den Logs der Themen; aktiv ist, was in den letzten 30 Tagen erwähnt wurde.
+- Aus einem Termin wird nur eine Aufgabe, was jemand zugesagt oder als Auftrag bekommen hat. Was nur
+  geschehen „sollte“, steht im Parkplatz der Termin-Notiz („Noch ohne Zusage: …“). Unter einer Aufgabe
+  steht eingerückt der Satz aus dem Material, auf den sie sich stützt („Beleg“).
+
+## Meine Woche: was mache ich mit meinen Punkten?
+
+Befehl „Meine Woche: offene Punkte einordnen (Triage)“. 2ndBrain legt höchstens zehn deiner offenen
+Punkte vor und schlägt zu jedem vor, was damit geschehen soll – mit Begründung:
+
+- **Bleibt bei dir** – Fokus-Thema, oder nur du kannst es (entscheiden, freigeben, antworten).
+- **Übergeben** – eine Ausarbeitung, und im Punkt oder am Thema steht jemand, dem du etwas geben
+  kannst: aus deiner Linie, aus deinem Fachkreis (Matrix), ein Team oder eine Runde.
+- **Nachfassen** – der Text nennt jemand anderen als Handelnden.
+- **Fürs Atlas-Paket** – eine Änderung am Kanon, keine Aufgabe.
+- **Parken** – älter als 60 Tage, ohne Frist, kein Termin zum Thema in Sicht.
+
+Ein Klick bestätigt: Beim Übergeben und Nachfassen wechselt die verantwortliche Person, und der Punkt
+steht danach unter „Nachfassen“; Geparktes verschwindet aus den Listen (in der Notiz bleibt es als
+`[-]` stehen, zurück mit `[ ]`). „Bleibt bei mir“ lehnt den Vorschlag ab.
+
+An wen du übergeben kannst, steht in `.2ndbrain/local.config.json` unter `delegation`: `rollen`
+(z. B. „architekt“ – alle mit dieser Rolle), `personen` (einzelne dazu), `gruppen` (leer = alle Teams
+und Reihen). Die eigene Linie kommt aus der Organisation.
+
+## Organisation und Lagebild
+
+- `reports/orgchart` – deine Linie als Bild, mit den offenen Zusagen je Person, und die Liste der
+  Personen, deren Platz noch fehlt. Eine Berichtslinie änderst du auf der Personenseite:
+  `berichtet_an: '[[vorname-nachname]]'` im Frontmatter.
+- `reports/lagebild` – drei Bilder: wer dir was schuldet und wie lange schon; wo viel offen ist und
+  sich nichts bewegt; wo im Ablauf (laut Kanon) es klemmt.
+
+Beide schreibt die Automatik neu.
+
+## Alles neu aufbauen
+
+Befehl „Alles neu aufbauen (in einer Kopie neben dem Vault)“. Ändert sich mit einer neuen Version, wie
+2ndBrain Aufgaben oder den Stand ableitet, rechnet der Neuaufbau den Bestand aus dem Material der
+Termine und aus den eingearbeiteten Mails und Dokumenten neu – in einer Kopie neben dem Vault. Dein
+Vault bleibt, wie er ist. Am Ende steht in der Kopie `reports/neuaufbau-vergleich`: vorher gegen
+nachher. Passt es, tauschst du die Ordner von Hand; der alte bleibt als Sicherung. Das dauert Stunden
+und lässt sich fortsetzen.
+
+## Wenn das Modell fehlt
+
+„Automatik – letzter Lauf“ zeigt, warum das Modell fehlte, was liegen blieb und was zu tun ist;
+„Diagnose starten“ prüft die Verbindung Schritt für Schritt. Sperrt der Server ein Modell, fordert
+2ndBrain es an – dafür braucht es den Modell-Schlüssel (Einstellungen → Modell-Schlüssel; er liegt nur
+im Schlüsselbund dieses Geräts). Fällt die Prüfstufe aus, steht das an der Termin-Notiz.
 
 ## Chat: Fragen an den Vault
 
@@ -259,7 +360,7 @@ es beim nächsten Lauf. Unterwegs erreicht das Handy den Modell-Server zum Beisp
 | `entities/people/`, `teams/`, `companies/` | Personen, Teams, Firmen |
 | `entities/glossary/`, `contexts/`, `systems/` | Begriffe, fachliche Kontexte, Systeme |
 | `entities/meeting-playbooks/` | Termin-Typen: was Vor- und Nachbereitung je Typ tun |
-| `reports/` | Berichte und Vorschlagslisten |
+| `reports/` | Berichte und Vorschlagslisten, der wöchentliche Fokus-Spiegel |
 | `00_…` bis `07_…` | Cockpit: Themen-Radar, Aufgaben, Rückfragen, Risiken, Glossar |
 | `.2ndbrain/` | Konfiguration (Modell, Kanon, Protokoll-Vorlage, Chat-Rezepte) und Daten dieses Vaults; in Obsidian unsichtbar, die Einstellungen schreiben hinein |
 
@@ -269,6 +370,8 @@ In der Befehlspalette (Strg/Cmd + P), alle mit „2ndBrain:“ davor:
 
 - Heute öffnen · Fragen an den Vault (Chat) · Sofortsuche: Thema oder Person · Anleitung: so
   funktioniert 2ndBrain
+- Fokus planen · Fokus-Spiegel öffnen · Fokus-Spiegel jetzt erstellen (Desktop)
 - Diesen Termin nacherfassen / nachbereiten · Thema für diesen Termin festlegen · Nachbereitung dieses
   Termins zurücknehmen
-- Stand dieses Themas aktualisieren · Automatik jetzt ausführen · Systemübersicht öffnen (LikeC4)
+- Stand dieses Themas aktualisieren · Automatik jetzt ausführen · Automatik: letzter Lauf (Schritte und
+  Fehler) · Systemübersicht öffnen (LikeC4)

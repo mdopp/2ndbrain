@@ -186,6 +186,7 @@ export class SecondBrainSettingTab extends PluginSettingTab {
       + "eintragen, dem du deine Notizen anvertraust.", "http://localhost:8080");
     this.modelSetting(el, llm);
     this.reviewModelSetting(el, llm);
+    this.modelKeySetting(el);
     this.templateSetting(el, local);
     new Setting(el)
       .setName("Kanon (fachliches Modell)")
@@ -251,6 +252,42 @@ export class SecondBrainSettingTab extends PluginSettingTab {
       d.setValue(current).setDisabled(llm === null)
         .onChange(async (v) => { await this.save(LLM_CONFIG, { model_pruefung: v }); });
     });
+  }
+
+  /** Modell-Schluessel: damit fordert die Engine ein gesperrtes Modell selbst an (Lease). Liegt nur im
+   *  Obsidian-Schluesselbund, wird nie angezeigt und steht in keiner Datei. */
+  private modelKeySetting(el: HTMLElement): void {
+    const s = new Setting(el).setName("Modell-Schlüssel");
+    if (!this.plugin.hasSecretStorage) {
+      s.setDesc("Dieses Obsidian hat noch keinen Schlüsselbund (ab 1.11.4). Ohne Plugin: Umgebungsvariable VAULT_LLM_KEY.");
+      return;
+    }
+    const da = this.plugin.modelKey() !== "";
+    s.setDesc((da ? "Im Obsidian-Schlüsselbund – nur auf diesem Gerät. " : "Nur nötig, wenn der Server Modelle sperrt. ")
+      + "Gibt der Server gerade nur ein Modell frei, fordert die Engine damit das bessere Modell an (Prüfstufe, "
+      + "Nachbereitung) und gibt es danach zurück. Wird nie angezeigt.");
+    let value = "";
+    s.addText((t) => {
+      t.inputEl.type = "password";
+      t.setPlaceholder(da ? "neuer Schlüssel" : "Schlüssel des Modell-Servers").onChange((v) => { value = v; });
+    });
+    s.addButton((b) => b.setButtonText("Speichern").onClick(() => {
+      if (!value.trim()) {
+        new Notice("Kein Schlüssel eingegeben.");
+        return;
+      }
+      this.plugin.setModelKey(value);
+      value = "";
+      new Notice("Modell-Schlüssel im Schlüsselbund gespeichert.");
+      this.display();
+    }));
+    if (da) {
+      s.addButton((b) => b.setButtonText("Entfernen").onClick(() => {
+        this.plugin.setModelKey("");
+        new Notice("Modell-Schlüssel aus dem Schlüsselbund entfernt.");
+        this.display();
+      }));
+    }
   }
 
   /** Protokoll-Vorlage: wo sie liegt (`protokoll.vorlage`) - und gleich hier bearbeiten,

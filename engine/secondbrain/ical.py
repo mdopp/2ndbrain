@@ -336,10 +336,50 @@ def expand(start, rule: dict, window_end, rdates=(), max_periods: int = MAX_PERI
 
 # ----------------------------------------------------------------- Termine
 
+_DURATION_RE = re.compile(r"([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?")
+
+
+def duration(value: str) -> timedelta | None:
+    """DURATION (RFC 5545 3.3.6): `PT1H30M`, `P1D`, `P1W`, `P1DT2H` - None, wenn unlesbar."""
+    m = _DURATION_RE.fullmatch(value.strip().upper())
+    if not m or not any(m.group(i) for i in range(2, 7)):
+        return None
+    w, d, h, mi, s = (int(m.group(i) or 0) for i in range(2, 7))
+    td = timedelta(weeks=w, days=d, hours=h, minutes=mi, seconds=s)
+    return -td if m.group(1) == "-" else td
+
+
+def minutes(ev: dict, tzs: dict, local=system_local) -> int | None:
+    """Dauer eines Termins in Minuten: DTEND - DTSTART in Ortszeit, sonst DURATION. None fuer
+    ganztaegige Termine, ohne Ende und fuer Unsinn (nicht positiv, laenger als ein Tag)."""
+    ds = prop(ev, "DTSTART")
+    if not ds:
+        return None
+    try:
+        start = to_local(ds[1], ds[0], tzs, local)
+        if not isinstance(start, datetime):
+            return None
+        de, du = prop(ev, "DTEND"), prop(ev, "DURATION")
+        if de:
+            end = to_local(de[1], de[0], tzs, local)
+            if not isinstance(end, datetime):
+                return None
+            length = end - start
+        elif du and (d := duration(du[1])) is not None:
+            length = d
+        else:
+            return None
+    except ValueError:
+        return None
+    n = round(length.total_seconds() / 60)
+    return n if 0 < n <= 24 * 60 else None
+
+
 def events(text: str, start: date, end: date, local=system_local) -> tuple[list[dict], list[str]]:
     """Alle Termine mit Beginn im Zeitraum [start, end] (Ortszeit, Tage einschliesslich),
     Serien aufgeloest, verschobene Einzeltermine statt ihres Serien-Termins.
-    Termin: {"start", "all_day", "uid", "comp", "status"}; Rueckgabe (termine, warnungen)."""
+    Termin: {"start", "all_day", "uid", "comp", "status", "minuten"}; Rueckgabe (termine, warnungen).
+    `minuten`: Dauer (DTEND/DURATION des Eintrags, bei Serien die der Serie), None wenn unbekannt."""
     comps = parse(text)
     tzs = {}
     for tz in walk(comps, "VTIMEZONE"):
@@ -360,9 +400,11 @@ def events(text: str, start: date, end: date, local=system_local) -> tuple[list[
     def emit(ev, when):
         st = prop(ev, "STATUS")
         uid = prop(ev, "UID")
-        out.append({"start": when, "all_day": not isinstance(when, datetime), "comp": ev,
+        all_day = not isinstance(when, datetime)
+        out.append({"start": when, "all_day": all_day, "comp": ev,
                     "uid": uid[1].strip() if uid else "",
-                    "status": "abgesagt" if st and st[1].strip().upper() == "CANCELLED" else ""})
+                    "status": "abgesagt" if st and st[1].strip().upper() == "CANCELLED" else "",
+                    "minuten": None if all_day else minutes(ev, tzs, local)})
 
     for ev in vevents:
         ds = prop(ev, "DTSTART")

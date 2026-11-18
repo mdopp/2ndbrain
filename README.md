@@ -15,8 +15,8 @@ Die Begriffe und wie sie im Code heißen: [KONZEPT §19](docs/KONZEPT.md#19-begr
 
 | Teil | Ordner | Läuft auf | Was es tut |
 |---|---|---|---|
-| Obsidian-Plugin | `plugin/` | Desktop und Handy | Heute, Aufgaben- und Risiken-Seiten, Sofortsuche, Nacherfassen, Chat |
-| Engine (Python) | `engine/secondbrain/` | Desktop | Automatik: Kalender, Mails, Einarbeiten, Vor- und Nachbereiten, Stand, Glossar; MCP-Server für Claude |
+| Obsidian-Plugin | `plugin/` | Desktop und Handy | Heute mit den eigenen Fokus-Themen, Aufgaben- und Risiken-Seiten, Sofortsuche, Nacherfassen, Chat |
+| Engine (Python) | `engine/secondbrain/` | Desktop | Automatik: Kalender, Mails, Einarbeiten, Vor- und Nachbereiten, Stand, Glossar, Fokus-Spiegel; MCP-Server für Claude |
 | Entwickler-Werkzeuge | `engine/tools/` | – | Referenzlauf, Entdrahtung, Plugin- und Prompt-Vergleich (nur im Code-Repo) |
 | Vorlagen | `engine/secondbrain/vorlage/` | – | was ein neuer Vault braucht: Cockpit-Seiten, Templates, Playbooks, Chat-Rezepte, Protokoll-Vorlage |
 | Anleitung | `plugin/anleitung.md` | Desktop und Handy | die Anleitung für Benutzer – ins Plugin eingebaut, passt immer zur Version |

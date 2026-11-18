@@ -1,13 +1,14 @@
 # 2ndBrain-Engine (Python)
 
 Der Teil von 2ndBrain, der am Desktop rechnet: Automatik, Einarbeiten des Eingangs, Vor- und
-Nachbereiten von Terminen, Stand je Thema, Glossar, Systemübersicht und der MCP-Server für Claude.
-Das Obsidian-Plugin startet sie; man kann sie auch im Terminal nutzen.
+Nachbereiten von Terminen, Stand je Thema, Glossar, Fokus-Spiegel, Systemübersicht und der MCP-Server
+für Claude. Das Obsidian-Plugin startet sie; man kann sie auch im Terminal nutzen.
 
 ```bash
 2ndbrain help                      # alle Befehle (oder: python -m secondbrain help)
 2ndbrain einrichten                # im Vault-Ordner: fehlende Vorlagen, Pfade, Prüfungen, MCP-Befehl
 2ndbrain auto --dry-run            # was die Automatik jetzt täte
+2ndbrain fokus                     # die eigenen Fokus-Themen mit den Zahlen der letzten 7 Tage
 ```
 
 Die Engine findet den Vault über `VAULT_DIR` (so startet sie das Plugin, so steht es im MCP-Befehl)

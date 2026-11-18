@@ -1,5 +1,6 @@
-// Offene Punkte lesen und abhaken - wie aufgaben.py (Format: KONZEPT §4.1), auf dem Vault mit
-// demselben Ergebnis wie `2ndbrain aufgaben --open --json`. Neue Punkte schreibt die Engine.
+// Offene Punkte lesen, abhaken und - fuer „Fokus planen“ - einen neuen Punkt anhaengen, wie aufgaben.py
+// (Format: KONZEPT §4.1), auf dem Vault mit demselben Ergebnis wie `2ndbrain aufgaben --open --json`.
+// Alle uebrigen neuen Punkte schreibt die Engine.
 //
 //     - [ ] Text — [[owner|Name]] · [[thema|Titel]] 📅 2026-10-03 ➕ 2026-09-14 (→ [[quelle]])
 //     - [ ] ❓ Frage? — an [[person|Name]] · [[thema|Titel]] ➕ 2026-08-03
@@ -22,6 +23,7 @@ const UNRESOLVED = "(?)";
 export const MEETING_SECTION = "## Actions";
 export const TOPIC_SECTION = "## Offene Punkte";
 export const EVENT_LOG_SECTION = "## Event Log";
+export const DESCRIPTION_SECTION = "## Beschreibung";
 export const ALTBESTAND_HEADING = "### Altbestand – im nächsten Termin prüfen";
 
 export interface Task {
@@ -247,6 +249,57 @@ export function completeInText(content: string, line: number, expected: string |
   if (!t.done) next = next.replace(SOURCE_TAIL_RE, (_m, src?: string) => ` ${DONE} ${today}${src ?? ""}`);
   lines[line] = next;
   return { ok: true, aktion: "erledigt", text: lines.join("\n") };
+}
+
+const wikilink = (slug: string, name: string): string => (name && name !== slug ? `[[${slug}|${name}]]` : `[[${slug}]]`);
+
+/** Neuer Punkt in der kanonischen Form (aufgaben.render): `- [ ] Was — [[wer|Name]] · [[thema|Titel]] 📅 … ➕ …`. */
+export function renderTask(t: { text: string; owner: { slug: string; name: string } | null;
+                                topics: { slug: string; name: string }[]; due?: string | null; created?: string | null }): string {
+  const text = t.text.split(/\s+/u).filter(Boolean).join(" ");
+  const owner = t.owner ? wikilink(t.owner.slug, t.owner.name) : "";
+  const topics = t.topics.map((x) => wikilink(x.slug, x.name));
+  const meta = owner || topics.length ? SEP_META + (owner || "?") + topics.map((x) => SEP_TOPIC + x).join("") : "";
+  const dates = ([[DUE, t.due], [CREATED, t.created]] as const).filter(([, v]) => !!v).map(([e, v]) => ` ${e} ${v}`).join("");
+  return `- [ ] ${text}${meta}${dates}`;
+}
+
+/** Punkte unter `heading` anhaengen (aufgaben.append_to_section): Dubletten (gleicher `key`) fallen weg,
+ *  bestehende Zeilen bleiben unveraendert, neue kommen vor einen Unterabschnitt (Altbestand). Fehlt der
+ *  Abschnitt, entsteht er vor `## Beschreibung`/`## Event Log`, sonst am Ende. */
+export function appendToSection(text: string, heading: string, neu: string[],
+                                insertBefore: string[] = [DESCRIPTION_SECTION, EVENT_LOG_SECTION]): { text: string; added: number } {
+  const lines = text.split("\n");
+  const existing = new Set(lines.map(parseLine).filter((t): t is Task => t !== null).map(key));
+  const toAdd: string[] = [];
+  for (const line of neu) {
+    const t = parseLine(line);
+    const k = t ? key(t) : "";
+    if (k && !existing.has(k)) {
+      existing.add(k);
+      toAdd.push(line);
+    }
+  }
+  if (!toAdd.length) return { text, added: 0 };
+  const idx = lines.findIndex((l) => strip(l) === heading);
+  if (idx < 0) {
+    const at = lines.findIndex((l) => insertBefore.includes(strip(l)));
+    if (at < 0) return { text: `${text.replace(/\n+$/u, "")}\n\n${[heading, ...toAdd].join("\n")}\n`, added: toAdd.length };
+    const block = [heading, ...toAdd, ""];
+    if (at > 0 && strip(lines[at - 1])) block.unshift("");
+    lines.splice(at, 0, ...block);
+    return { text: lines.join("\n"), added: toAdd.length };
+  }
+  let end = lines.findIndex((l, j) => j > idx && l.startsWith("## "));
+  if (end < 0) end = lines.length;
+  let stop = lines.findIndex((l, j) => j > idx && j < end && l.startsWith("### "));
+  if (stop < 0) stop = end;
+  let last = idx;
+  for (let j = idx + 1; j < stop; j++) if (strip(lines[j])) last = j;
+  lines.splice(last + 1, 0, ...toAdd);
+  const after = last + 1 + toAdd.length;
+  if (after < lines.length && (lines[after].startsWith("## ") || lines[after].startsWith("### "))) lines.splice(after, 0, "");
+  return { text: lines.join("\n"), added: toAdd.length };
 }
 
 /** Darf hier abgehakt werden? Nur Termin- und Themen-Dateien (wie `2ndbrain aufgaben --done`). */

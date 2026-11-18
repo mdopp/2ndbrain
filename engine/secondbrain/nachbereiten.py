@@ -303,7 +303,11 @@ def _action_task(a: dict, meta: dict | None = None) -> tk.Task:
     bis = str(a.get("bis") or "").strip()
     created = str(meta.get("created") or "")
     topic = a.get("thema") or meta.get("topic")   # pro Punkt, sonst Meeting-Thema
+    beleg = " ".join(str(a.get("beleg") or "").split())
     return tk.Task(status=" ", text=" ".join(str(a.get("was", "")).split()),
+                   # der Satz aus dem Material, aus dem Aufgabe und Person hervorgehen (geprueft in
+                   # nachbereiten_modell.einordnen) - als Unterpunkt, wie die Belege im Altbestand
+                   notes=[f"Beleg: „{beleg}“"] if beleg else [],
                    kind=tk.KIND_QUESTION if a.get("frage") else tk.KIND_TASK,
                    owner=owner, owner_raw=owner_raw,
                    topics=[topic] if topic else [],
@@ -479,9 +483,11 @@ def _process_note(path: Path, *, dry_run: bool, min_chars: int) -> dict:
                                    fm.get("themen") if isinstance(fm.get("themen"), list) else None)
     if ok:
         try:
+            ich_slug = str(vp.local_config().get("ich") or "")
             result = nachbereiten_modell.extract(stoff, playbook_view, {
                 "title": title, "date": str(fm.get("date", "")), "topics": kandidaten,
-                "default_topic": default_topic})
+                "default_topic": default_topic,
+                "ich": (tk.Names().person(ich_slug) or "") if ich_slug else ""})
             mode = "llm"
             if result.get("error"):
                 error_reason = result["error"]
@@ -536,6 +542,10 @@ def _process_note(path: Path, *, dry_run: bool, min_chars: int) -> dict:
             "nachbereitet_von": "modell" if mode == "llm" else "notbehelf",
             # zweite Stufe (nachbereiten_modell.pruefen): welches Modell den Entwurf geprueft hat
             "geprueft_von": result.get("geprueft_von") if mode == "llm" else None,
+            # ein anderes Modell als das gewuenschte hat den Entwurf geschrieben (modell.kandidaten)
+            "modell_ersatz": (result.get("modell_ersatz") or None) if mode == "llm" else None,
+            # die Pruefstufe war eingestellt und fiel aus (gesperrt, Zeitlimit, zu lang): der Entwurf gilt
+            "pruefung_ausgefallen": (result.get("pruefung_ausgefallen") or None) if mode == "llm" else None,
             "eingearbeitet": None,
         })
         finish_undo(path)

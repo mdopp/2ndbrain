@@ -14,6 +14,8 @@ import { DIRS, VaultSource, stem } from "./quelle";
 import { logEntries, newestFirst } from "./themenlog";
 import { noteTopics, resolve, slugOf } from "./themen";
 import { normalizeTitle, seriesKey } from "./titel";
+import { EVENTS_JSON, ZEIT_TAGE, dauerFuer, dauerIndex, fokusText, fokusThemen, fokusVon, fokusZeilen, zeitVerteilung } from "./fokus";
+import { VaultIndex } from "./vaultIndex";
 
 export interface AbfrageKontext { g: Graph; src: VaultSource; today: string; me: string }
 export interface AbfrageErgebnis { text: string; schritt: string }
@@ -73,6 +75,13 @@ export const ABFRAGE_WERKZEUGE: WerkzeugSpec[] = [
         wert: { type: "string" } }, required: ["feld", "op"] } },
       felder: { type: "array", items: { type: "string" }, description: "Felder, die mit angezeigt werden" },
       sortiere: { type: "string", description: "Feld; mit - davor absteigend" } } } },
+  { name: "fokus",
+    beschreibung: "Deine Fokus-Themen nach Rang (Ziel, Zieltermin, Ampel) mit dem, was der Code zählt: nächster eigener "
+      + "Schritt, offene und überfällige Schritte, Termine und Stunden im Rückblick, nächster Termin, zuletzt bewegt, "
+      + "Warnungen – dazu, wohin deine Zeit ging (Fokus, andere Themen, ohne Thema). Für „Tue ich das Richtige?“, "
+      + "„Wie stehen meine Prioritäten?“, „Wohin geht meine Zeit?“.",
+    parameter: { type: "object", properties: {
+      tage: { type: "integer", minimum: 7, maximum: 60, description: "Rückblick in Tagen, Standard 14" } } } },
   { name: "atlas",
     beschreibung: "Fragt den Domain Atlas ab: Nachrichten (Event, Command, Query) mit Sender und Empfänger samt deren "
       + "Owner, Prozesse mit ihren Schritten, Teams mit ihren Kontexten, das Domänenmodell (Fachobjekte mit Stereotyp "
@@ -360,6 +369,23 @@ function vergleiche(ctx: AbfrageKontext, wertListe: string[], op: string, soll: 
   const gleich = wertListe.some((w) => norm(w) === n || ids.has(ctx.g.pfadZu(w) ?? w)
     || norm((ctx.g.knoten.get(ctx.g.pfadZu(w) ?? w)?.name ?? "").replace(/\s*\([^)]*\)\s*$/, "")) === n);
   return op === "!=" ? !gleich : gleich;
+}
+
+// ------------------------------------------------------------------ Fokus
+
+/** Werkzeug `fokus`: die Fokus-Themen mit denselben Zahlen wie in Heute (core/fokus.ts), aus dem Vault. */
+export async function fokusAbfrage(ctx: AbfrageKontext, args: Record<string, unknown>): Promise<AbfrageErgebnis> {
+  const tage = Math.min(60, Math.max(7, Number.parseInt(str(args.tage ?? ""), 10) || ZEIT_TAGE));
+  const index = new VaultIndex(ctx.src);
+  const fokus = fokusThemen(index.topics(), ctx.today);
+  const schritt = "liest deinen Fokus";
+  if (!fokus.length) return { text: fokusText([], zeitVerteilung([], new Map()), tage, ctx.today), schritt };
+  const idx = dauerIndex(await ctx.src.readFile(EVENTS_JSON));
+  const termine = index.termine(addDays(ctx.today, -tage), addDays(ctx.today, -1)).map((t) => ({ ...t, minuten: dauerFuer(t, idx) }));
+  const tasks = (await scanTasks(ctx.src)).filter(isOpen);
+  const farbe: Record<string, string> = { red: "rot", yellow: "gelb", green: "grün" };
+  return { text: fokusText(fokusZeilen(fokus, tasks, termine, ctx.me, ctx.today), zeitVerteilung(termine, fokusVon(fokus)),
+                           tage, ctx.today, (h) => farbe[h] ?? "ohne"), schritt };
 }
 
 export function abfrage(ctx: AbfrageKontext, args: Record<string, unknown>, max = 40): AbfrageErgebnis {

@@ -1,6 +1,7 @@
 // Termine, Themen und Personen aus dem Vault - ohne Obsidian und ohne Python. In Obsidian kommt
 // das Frontmatter aus dem metadataCache (schnell, live), in anderen Clients aus deren Quelle.
 import { AltbestandInfo, MeetingInfo, TopicInfo, hasMaterial } from "./ansicht";
+import { TerminZeit, fokusRang } from "./fokus";
 import type { VaultSource } from "./quelle";
 import { stem } from "./quelle";
 import { noteTopics } from "./themen";
@@ -21,9 +22,16 @@ const TOPICS = "entities/projects";
 const FORUMS = "entities/forums";
 const PEOPLE = "entities/people";
 const MEETINGS = "active-meetings";
+const ARCHIVE = "archive/meetings";
 
 function str(v: unknown): string {
   return v === null || v === undefined ? "" : String(v);
+}
+
+/** JJJJ-MM-TT aus einem Feld (auch Datum mit Zeit); "" wenn keins. */
+function isoTag(v: unknown): string {
+  const s = str(v).trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
 }
 
 function list(v: unknown): string[] {
@@ -113,7 +121,7 @@ export class VaultIndex {
     };
   }
 
-  /** Themen mit den Radar-Eigenschaften aus stand.py (fuer "Heute"). */
+  /** Themen mit den Radar-Eigenschaften aus stand.py (fuer "Heute") und dem Fokus (core/fokus.ts). */
   topics(): TopicInfo[] {
     const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
     return this.files(TOPICS).map((path) => {
@@ -124,8 +132,26 @@ export class VaultIndex {
         risks: num(fm.risiken_30t), altbestand: num(fm.altbestand),
         nextMeeting: str(fm.naechster_termin).slice(0, 10),
         inherited: fm.ampel_geerbt === true,
+        parent: stripLink(str(fm.parent)).split("|")[0].trim(),
+        fokus: fokusRang(fm.fokus), ziel: str(fm.ziel).replace(/\s+/g, " ").trim(),
+        zieltermin: isoTag(fm.target_date), zuletztBewegt: isoTag(fm.zuletzt_bewegt),
       };
     });
+  }
+
+  /** Termin-Notizen (aktiv und archiviert) mit Tag in [von, bis] - ohne uebersprungene und entfallene;
+   *  fuer „wohin ging meine Zeit“ (core/fokus.ts). Die Dauer kommt aus dem Kalender dazu. */
+  termine(von: string, bis: string): TerminZeit[] {
+    const out: TerminZeit[] = [];
+    for (const path of [...this.files(MEETINGS), ...this.files(ARCHIVE)]) {
+      const fm = this.src.frontmatter(path);
+      const date = isoTag(fm.date || fm.timestamp) || (/^\d{4}-\d{2}-\d{2}/.exec(stem(path))?.[0] ?? "");
+      if (!date || date < von || date > bis) continue;
+      if (fm.skip_meeting === true || str(fm.skip_meeting) === "true" || str(fm.status) === "entfallen") continue;
+      out.push({ date, time: str(fm.meeting_time).slice(0, 5), title: str(fm.title) || stem(path),
+                 topics: noteTopics(fm), uid: str(fm.outlook_uid), minuten: null });
+    }
+    return out;
   }
 
   /** Themen und Gremien mit ungeprueftem Altbestand (fuer die Aufgaben-Seite). */

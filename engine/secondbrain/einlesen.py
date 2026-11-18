@@ -30,6 +30,19 @@ TOOLS = vp.ENGINE_DIR
 PY = sys.executable
 
 
+def _meldung(stderr: str, tail: str) -> str:
+    """Was ein gescheitertes Unterprogramm sagt - ganz, nicht nur die letzte Zeile: ab der Zeile mit
+    ERROR/FEHLER (die Meldung samt Hilfetext; Fortschritt davor faellt weg), sonst die letzten Zeilen
+    (ein Traceback endet mit der Ausnahme)."""
+    zeilen = [z.rstrip() for z in (stderr or "").strip().splitlines() if z.strip()]
+    if not zeilen:
+        return tail
+    start = next((i for i, z in enumerate(zeilen) if z.lstrip().startswith(("ERROR", "FEHLER"))), None)
+    if start is not None:
+        return "\n".join(zeilen[start:])[:1500]
+    return "\n".join(zeilen[-12:])[-1500:]
+
+
 def _run(label: str, args: list[str], *, timeout: int = 600) -> tuple[bool, str]:
     try:
         r = subprocess.run(args, cwd=str(vp.VAULT), capture_output=True,
@@ -39,7 +52,7 @@ def _run(label: str, args: list[str], *, timeout: int = 600) -> tuple[bool, str]
     out = (r.stdout or "").strip().splitlines()
     tail = out[-1] if out else ""
     if r.returncode != 0:
-        return False, (r.stderr or "").strip().splitlines()[-1:][0] if r.stderr else tail
+        return False, _meldung(r.stderr, tail)
     return True, tail
 
 

@@ -293,9 +293,53 @@ def overview(today: date | None = None) -> list[dict]:
     return out
 
 
+PARKEN_TAGE = 60
+
+
+def parken(*, tage: int = PARKEN_TAGE, anwenden: bool = False, today: date | None = None) -> dict:
+    """Ungeprueften Altbestand auslaufen lassen: offene Punkte im Abschnitt "Altbestand", die aelter als
+    `tage` sind, keine Frist haben und zu keinem Fokus-Thema gehoeren, werden geparkt - `[-]` mit dem
+    Vermerk "Geparkt am ...", also aus allen Sichten, aber nicht geloescht (wieder oeffnen: `[-]` zu
+    `[ ]`). Ohne `anwenden` nur die Vorschau: {je_thema: {slug: n}, gesamt, bleibt}."""
+    import triage
+    today = today or date.today()
+    themen = triage._themen()
+    tag = today.strftime("%d.%m.%Y")
+    je_thema: dict[str, int] = {}
+    bleibt = 0
+    for f in _topic_files():
+        text = f.read_text(encoding="utf-8")
+        lines = text.split("\n")
+        treffer: list[tuple[int, int]] = []
+        for t in tk.tasks_in_text(text, "topic", stem=f.stem):
+            if not (t.pruefen and t.is_open) or t.line is None:
+                continue
+            alter = (today - date.fromisoformat(t.created)).days if t.created and tk._ISO_RE.match(t.created) else None
+            if alter is None or alter <= tage or t.due or triage._ist_fokus(f.stem, themen):
+                bleibt += 1
+                continue
+            treffer.append((t.line, alter))
+        if not treffer:
+            continue
+        je_thema[f.stem] = len(treffer)
+        if anwenden:
+            for nr, alter in sorted(treffer, reverse=True):          # von unten, damit die Zeilennummern gelten
+                einzug = lines[nr][: len(lines[nr]) - len(lines[nr].lstrip())]
+                lines[nr] = tk._CHECKBOX_STATUS_RE.sub(r"\g<1>-\g<2>", lines[nr], count=1)
+                lines.insert(nr + 1, f"{einzug}{tk.NOTE_PREFIX}Geparkt am {tag} (Altbestand, ungeprüft, {alter} Tage alt) "
+                                     "– wieder öffnen: `[-]` zu `[ ]`")
+            f.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    return {"ok": True, "angewendet": anwenden, "tage": tage, "gesamt": sum(je_thema.values()), "bleibt": bleibt,
+            "je_thema": dict(sorted(je_thema.items(), key=lambda kv: -kv[1]))}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Altbestand im naechsten Termin klaeren")
     ap.add_argument("--settle", action="store_true", help="nachbereitete Termine auswerten")
+    ap.add_argument("--parken", action="store_true",
+                    help="alten, ungeprueften Altbestand parken - Vorschau; mit --anwenden schreiben")
+    ap.add_argument("--tage", type=int, default=PARKEN_TAGE, help="ab diesem Alter parken (Vorgabe 60)")
+    ap.add_argument("--anwenden", action="store_true")
     ap.add_argument("--geprueft", metavar="SLUG", help="Thema von Hand als geprueft markieren")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -318,6 +362,26 @@ def main(argv: list[str] | None = None) -> int:
         c = r["counts"]
         print(f"{args.geprueft}: als geprüft übernommen - {c['offen']} weiter offen, "
               f"{c['erledigt']} erledigt, {c['verworfen']} verworfen")
+        return 0
+
+    if args.parken:
+        import auto   # dieselbe Sperre wie die Automatik
+        if args.anwenden and not auto.acquire_lock():
+            print("[ABBRUCH] Die Automatik läuft gerade - gleich noch einmal.", file=sys.stderr)
+            return 1
+        try:
+            r = parken(tage=args.tage, anwenden=args.anwenden)
+        finally:
+            if args.anwenden:
+                auto.release_lock()
+        if args.json:
+            print(json.dumps(r, ensure_ascii=False, indent=2))
+        else:
+            print(f"Altbestand älter als {r['tage']} Tage, ohne Frist, kein Fokus: {r['gesamt']} Punkt(e) "
+                  + ("geparkt" if r["angewendet"] else "würden geparkt (Vorschau – mit --anwenden schreiben)")
+                  + f"; {r['bleibt']} bleiben")
+            for slug, n in list(r["je_thema"].items())[:25]:
+                print(f"  {slug:40} {n}")
         return 0
 
     if args.settle:
