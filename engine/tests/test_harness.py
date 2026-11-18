@@ -713,6 +713,24 @@ def t_neuaufbau_schuetzt_den_vault():
     eq(neuaufbau._abschnitt_leeren("## Actions\n- [ ] x\n\n## Parkplatz\n- y\n", "## Actions"),
        "## Actions\n\n## Parkplatz\n- y\n", "nur der eine Abschnitt wird geleert:")
 
+    # Auf der Befehlszeile kommt immer ein Ergebnis mit Grund - nie nur ein Abbruch ohne JSON
+    import contextlib
+    import io as _io
+    import json as _json
+    for args, erwartet in ((["zuruecksetzen", "--json"], "keine Neuaufbau-Kopie"),):
+        aus = _io.StringIO()
+        with contextlib.redirect_stdout(aus):
+            code = neuaufbau.main(args)
+        r = _json.loads(aus.getvalue().strip().splitlines()[-1])
+        ok(code == 1 and r["ok"] is False and erwartet in r["grund"], f"Grund im JSON: {r}")
+    with _AttrGuard(neuaufbau, anlegen=lambda ziel=None: (_ for _ in ()).throw(PermissionError("gesperrt"))):
+        aus, err = _io.StringIO(), _io.StringIO()
+        with contextlib.redirect_stdout(aus), contextlib.redirect_stderr(err):
+            code = neuaufbau.main(["anlegen", "--json"])
+        r = _json.loads(aus.getvalue().strip().splitlines()[-1])
+        ok(code == 1 and r["grund"] == "PermissionError: gesperrt" and "Traceback" in err.getvalue(),
+           f"ein unerwarteter Fehler steht mit Art und Text im Ergebnis: {r}")
+
     kopie = Path(tempfile.mkdtemp(prefix="neuaufbau-")) / "kopie"
     r = neuaufbau.anlegen(kopie)
     ok(r["ok"] and (kopie / ".2ndbrain" / "daten" / neuaufbau.MARKE).is_file(), f"Kopie mit Marke: {r}")

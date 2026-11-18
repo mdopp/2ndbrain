@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauMeldung, neuaufbauZeilen, startKnopf,
+  ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung, neuaufbauZeilen,
+  startKnopf,
 } from "../src/core/neuaufbau";
 import { neuaufbauKopien, neuaufbauStand } from "../src/desktop/neuaufbau";
 
@@ -74,6 +75,28 @@ test("Stand von der Platte: die jüngste Kopie neben dem Vault, ohne die Engine 
 
   writeFileSync(join(neu, ".2ndbrain", "daten", "neuaufbau.json"), "{kaputt", "utf8");
   assert.equal(neuaufbauStand(vault).ok, false, "eine unlesbare Marke ist ein Fehler, kein leerer Stand");
+});
+
+test("Kein Ergebnis von der Engine: die Meldung nennt den Grund und den Ausweg", () => {
+  const gut = neuaufbauAuswerten({ code: 0, stderr: "[1/23] active-meetings/x.md", stdout: "Die Engine redet davor.\n{\"ok\": true, \"ziel\": \"/k\"}\n" });
+  assert.equal(gut.ergebnis?.ziel, "/k", "das Ergebnis ist die letzte JSON-Zeile, auch wenn davor Text steht");
+
+  const alt = neuaufbauAuswerten({ code: 1, stdout: "\n2ndBrain-Engine - Befehlszeile\n", stderr: "[FEHLER] Unbekannter Befehl: 'neuaufbau'" });
+  assert.equal(alt.ergebnis, null);
+  assert.match(alt.grund, /älter als das Plugin.*Engine → Aktualisieren/, "eine alte Engine kennt den Befehl nicht");
+
+  assert.match(neuaufbauAuswerten({ code: 1, stdout: "", stderr: "No module named secondbrain" }).grund, /nicht installiert/);
+  assert.match(neuaufbauAuswerten({ code: -1, stdout: "", stderr: "Kein Python ≥ 3.10 gefunden (PATH, Homebrew)" }).grund, /Python \(mindestens 3\.10\)/);
+  assert.match(neuaufbauAuswerten({ code: 1, stdout: "", stderr: "PermissionError: [WinError 5] Zugriff verweigert: 'C:\\\\x'" }).grund,
+               /kein Schreibrecht/);
+
+  const fremd = neuaufbauAuswerten({ code: 3, stdout: "", stderr: "Zeile 1\nZeile 2\nValueError: etwas Unerwartetes" });
+  assert.match(fremd.grund, /^Die Engine hat ohne Ergebnis aufgehört \(Code 3\)\.\nZeile 1\nZeile 2\nValueError: etwas Unerwartetes$/,
+               "ohne bekannten Grund: ihre letzten Zeilen");
+  assert.equal(neuaufbauAuswerten({ code: 0, stdout: "{\"version\": \"1\"}", stderr: "" }).ergebnis, null, "JSON ohne ok ist kein Ergebnis");
+
+  assert.equal(neuaufbauMeldung({ ok: false, ziel: "/k", grund: "PermissionError: gesperrt" }),
+               "Neuaufbau abgebrochen: PermissionError: gesperrt – Kopie: /k");
 });
 
 test("Meldung nach dem Lauf: nicht gestartet, unterbrochen, noch offen, fertig", () => {

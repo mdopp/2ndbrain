@@ -1,6 +1,6 @@
 {
   "name": "2ndbrain-obsidian-plugin",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "private": true,
   "description": "2ndBrain – Obsidian-Plugin (die Python-Engine liegt unter engine/)",
   "type": "module",

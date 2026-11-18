@@ -462,10 +462,13 @@ def _in_der_kopie(ziel: str, *args: str) -> dict:
     env = {**os.environ, "VAULT_DIR": ziel, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     r = subprocess.run([sys.executable, str(Path(__file__).resolve()), *args, "--json"], env=env, cwd=ziel,
                        stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-    try:
-        return json.loads((r.stdout or "").strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        return {"ok": False, "grund": f"Schritt {args[0]} lieferte kein Ergebnis (Code {r.returncode})"}
+    for zeile in reversed((r.stdout or "").strip().splitlines()):
+        if zeile.strip().startswith("{"):
+            try:
+                return json.loads(zeile)
+            except ValueError:
+                continue
+    return {"ok": False, "grund": f"Schritt „{args[0]}“ in der Kopie lieferte kein Ergebnis (Code {r.returncode})"}
 
 
 FORTSETZBAR = ("angelegt", "zurueckgesetzt", "baut", "unterbrochen")
@@ -518,8 +521,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     ziel = Path(args.ziel) if args.ziel else None
-    r = {"alles": lambda: alles(ziel, args.max), "anlegen": lambda: anlegen(ziel), "zuruecksetzen": zuruecksetzen,
-         "bauen": lambda: bauen(args.max), "vergleichen": vergleichen, "stand": stand}[args.schritt]()
+    # Immer ein Ergebnis: scheitert ein Schritt (kein Schreibrecht neben dem Vault, gesperrte Datei, volle
+    # Platte), steht der Grund im JSON - sonst bekaeme das Plugin nur "kein Ergebnis" zu sehen.
+    try:
+        r = {"alles": lambda: alles(ziel, args.max), "anlegen": lambda: anlegen(ziel), "zuruecksetzen": zuruecksetzen,
+             "bauen": lambda: bauen(args.max), "vergleichen": vergleichen, "stand": stand}[args.schritt]()
+    except SystemExit as e:
+        r = {"ok": False, "grund": str(e.code if e.code is not None else e).replace("[ABBRUCH] ", "")}
+    except Exception as e:                           # noqa: BLE001 - der Grund gehoert in die Meldung
+        import traceback
+        r = {"ok": False, "grund": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-1500:]}
+        print(r["traceback"], file=sys.stderr)
     if args.json:
         print(json.dumps(r, ensure_ascii=False))
     else:

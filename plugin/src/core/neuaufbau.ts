@@ -87,10 +87,56 @@ export function neuaufbauZeilen(s: NeuaufbauStand | null): { text: string; fehle
   return out;
 }
 
+interface Lauf { code: number; stdout: string; stderr: string }
+
+// Bekannte Gruende, warum die Engine kein Ergebnis liefert - der erste Treffer gilt.
+const GRUENDE: { muster: RegExp; text: string }[] = [
+  { muster: /Unbekannter Befehl|invalid choice|unrecognized arguments/i,
+    text: "Die Engine auf diesem Gerät kennt den Neuaufbau noch nicht – sie ist älter als das Plugin: "
+      + "Einstellungen → 2ndBrain → Engine → Aktualisieren." },
+  { muster: /No module named '?secondbrain|ModuleNotFoundError|ImportError/,
+    text: "Die Engine ist auf diesem Gerät nicht installiert oder unvollständig: Einstellungen → 2ndBrain → Engine → "
+      + "Installieren bzw. Aktualisieren." },
+  { muster: /Kein Python/,
+    text: "Kein passendes Python gefunden: Einstellungen → 2ndBrain → Python (mindestens 3.10)." },
+  { muster: /Kein Vault gefunden/,
+    text: "Die Engine findet den Vault nicht – das Plugin neu laden und noch einmal versuchen." },
+  { muster: /PermissionError|Zugriff verweigert|Access is denied|Operation not permitted/i,
+    text: "Die Kopie ließ sich nicht anlegen: kein Schreibrecht im Ordner neben dem Vault, oder eine Datei ist gesperrt "
+      + "(Synchronisation, Virenscanner). Ordner prüfen und noch einmal starten." },
+  { muster: /No space left|Es steht nicht genug Speicherplatz|ENOSPC/i,
+    text: "Kein Platz mehr für die Kopie neben dem Vault." },
+];
+
+function letzteZeilen(text: string, n: number): string {
+  return text.split(/\r?\n/).map((z) => z.trimEnd()).filter((z) => z.trim()).slice(-n).join("\n");
+}
+
+/** Ein Lauf von `2ndbrain neuaufbau … --json`: das Ergebnis ist die letzte JSON-Zeile auf stdout (davor darf die
+ *  Engine reden). Liefert sie keins, steht in `grund`, warum - der bekannte Ausweg, sonst ihre letzten Zeilen. */
+export function neuaufbauAuswerten(r: Lauf): { ergebnis: NeuaufbauErgebnis | null; grund: string } {
+  for (const zeile of r.stdout.split(/\r?\n/).reverse()) {
+    const z = zeile.trim();
+    if (!z.startsWith("{")) continue;
+    try {
+      const j = JSON.parse(z) as NeuaufbauErgebnis;
+      if (j && typeof j === "object" && typeof j.ok === "boolean") return { ergebnis: j, grund: "" };
+    } catch {
+      // keine JSON-Zeile - weiter nach oben
+    }
+  }
+  const alles = `${r.stderr}\n${r.stdout}`;
+  const bekannt = GRUENDE.find((g) => g.muster.test(alles));
+  if (bekannt) return { ergebnis: null, grund: bekannt.text };
+  const rest = letzteZeilen(r.stderr, 6) || letzteZeilen(r.stdout, 6);
+  return { ergebnis: null, grund: `Die Engine hat ohne Ergebnis aufgehört (Code ${r.code}).` + (rest ? `\n${rest}` : "") };
+}
+
 /** Eine Zeile fuer die Meldung nach dem Lauf. */
 export function neuaufbauMeldung(r: NeuaufbauErgebnis | null): string {
   if (!r) return "Neuaufbau: die Engine hat kein Ergebnis geliefert.";
   if (!r.ok && !r.ziel) return `Neuaufbau nicht gestartet: ${r.grund ?? "unbekannter Grund"}`;
+  if (!r.ok && r.grund && !r.gebaut) return `Neuaufbau abgebrochen: ${r.grund} – Kopie: ${r.ziel}`;
   const g = r.gebaut;
   if (g && !g.ok) return `Neuaufbau unterbrochen: ${g.grund ?? "unbekannter Grund"}${g.ausweg ? ` – ${g.ausweg}` : ""}`;
   if (g?.offen) return `Neuaufbau: ${g.nachbereitet ?? 0} Termine gerechnet, ${g.offen} noch offen – noch einmal starten setzt fort.`;

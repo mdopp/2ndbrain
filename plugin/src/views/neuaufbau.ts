@@ -46,6 +46,12 @@ export class NeuaufbauModal extends Modal {
     if (!this.standEl || !this.knoepfeEl) return;
     this.standEl.empty();
     for (const z of neuaufbauZeilen(s)) this.standEl.createDiv({ cls: z.fehler ? "sb-fehler" : "", text: z.text });
+    // was der letzte Start gemeldet hat - auch, warum er nicht lief
+    const meldung = this.plugin.neuaufbauLetzteMeldung;
+    if (meldung && !this.plugin.neuaufbauLaeuft) {
+      const nichtGelaufen = /^Neuaufbau (nicht|abgebrochen|unterbrochen)/.test(meldung);
+      this.standEl.createEl("pre", { cls: `sb-auto-pre${nichtGelaufen ? " sb-fehler" : ""}`, text: meldung });
+    }
     this.knoepfe(this.knoepfeEl, s);
   }
 

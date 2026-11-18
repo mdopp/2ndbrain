@@ -26,7 +26,7 @@ import { AutomatikModal } from "./views/automatik";
 import { NeuaufbauModal } from "./views/neuaufbau";
 import { TriageModal } from "./views/triage";
 import { TriageErgebnis, TriagePunkt, Vorschlag, anwendenArgs } from "./core/triage";
-import { ABLEITUNG_STAND, NeuaufbauErgebnis, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauMeldung } from "./core/neuaufbau";
+import { ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung } from "./core/neuaufbau";
 import { FokusAenderung, FokusModal } from "./views/fokus";
 import { ChatState, ChatView, VIEW_TYPE_CHAT, newChatState } from "./views/chat";
 import { AnleitungView, VIEW_TYPE_ANLEITUNG } from "./views/anleitung";
@@ -388,13 +388,28 @@ export default class SecondBrainPlugin extends Plugin {
     void this.neuaufbauGesehen();
     new Notice("2ndBrain: Neuaufbau gestartet – in einer Kopie neben dem Vault. Das dauert; der Stand steht unter "
       + "„Alles neu aufbauen“.", 15_000);
+    this.neuaufbauLetzteMeldung = "";
     try {
-      const r = await this.engine.json<NeuaufbauErgebnis>(["neuaufbau", "alles", "--json"], { timeoutMs: 24 * 3600_000 });
-      new Notice(`2ndBrain: ${neuaufbauMeldung(r)}`, 0);
+      // Eine Engine, die fehlt oder aelter ist als das Plugin, kennt den Befehl nicht - das vorher sagen, statt
+      // sie ins Leere laufen zu lassen (aus dem Code-Repo darf sie abweichen: Entwicklung)
+      const st = await this.refreshEngine();
+      if (st.state === "fehlt" || (st.state === "abweichend" && !this.engineQuelltext)) {
+        this.neuaufbauLetzteMeldung = `Neuaufbau nicht gestartet – die Engine passt nicht: ${st.text} `
+          + `(Einstellungen → 2ndBrain → Engine → ${st.state === "fehlt" ? "Installieren" : "Aktualisieren"})`;
+      } else {
+        const lauf = await this.engine.run(["neuaufbau", "alles", "--json"], { timeoutMs: 24 * 3600_000 });
+        const { ergebnis, grund } = neuaufbauAuswerten(lauf);
+        this.neuaufbauLetzteMeldung = ergebnis ? neuaufbauMeldung(ergebnis) : `Neuaufbau nicht gelaufen: ${grund}`;
+      }
+      new Notice(`2ndBrain: ${this.neuaufbauLetzteMeldung}`, 0);
     } finally {
       this.neuaufbauLaeuft = false;
     }
   }
+
+  /** Was der letzte in diesem Obsidian gestartete Neuaufbau gemeldet hat - das Fenster zeigt es, die Meldung
+   *  am Rand ist sonst weg, sobald man sie wegklickt. */
+  neuaufbauLetzteMeldung = "";
 
   /** `2ndbrain modell --diagnose`: die Verbindung zum Modell Schritt fuer Schritt, mit Ursache und Ausweg. */
   async modellDiagnose(): Promise<DiagnoseSchritt[] | null> {
