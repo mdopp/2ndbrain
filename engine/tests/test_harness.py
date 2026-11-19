@@ -248,7 +248,7 @@ def t_extract_splits_piece_when_answer_breaks():
     def fake_complete_json(messages, schema, **kw):
         text = messages[-1]["content"]
         aufrufe.append(len(text))
-        if len(text) > 4000:
+        if len(text) > 4500:               # das Ganze (rund 6600 Zeichen) bricht, eine Haelfte (rund 4000) nicht
             raise LLMOutputError("abgeschnitten")
         return {"ziel": "", "entscheidungen": [{"was": f"Beschluss {len(aufrufe)}", "wer": "X", "datum": ""}],
                 "actions": [], "kernteil": [], "parkplatz": []}, []
@@ -1096,6 +1096,135 @@ def t_altbestand_parkt_nur_alt_und_ohne_frist():
     eq(altbestand.parken(today=heute)["je_thema"].get("park-thema"), None, "ein zweiter Lauf findet nichts mehr:")
 
 
+# ───────────────────────────────────────── 14. Rolle je Thema, offene Punkte pruefen
+
+def t_rollen_vererben_und_blenden_aus():
+    import aufgaben
+    import rollen
+    import vault_paths
+    d = _VAULT / "entities" / "projects"
+    d.mkdir(parents=True, exist_ok=True)
+    seite = lambda slug, kopf: (d / f"{slug}.md").write_text(   # noqa: E731
+        f"---\ntype: project\ntitle: {slug}\n{kopf}---\n# {slug}\n\n## Offene Punkte\n\n## Event Log\n", encoding="utf-8", newline="\n")
+    seite("rolle-dach", "meine_rolle: beobachte\n")
+    seite("rolle-kind", "parent: \"[[rolle-dach]]\"\n")
+    seite("rolle-enkel", "parent: \"[[rolle-kind]]\"\nmeine_rolle: beteiligt\n")
+    seite("rolle-frei", "")
+    seite("rolle-meins", "verantwortlich: \"[[ich]]\"\n")
+    r = rollen.lade()
+    eq((r["rolle-dach"], r["rolle-kind"], r["rolle-enkel"], r["rolle-frei"]),
+       ("beobachte", "beobachte", "beteiligt", "fuehre"), "eigene Angabe, sonst das Dach, sonst fuehre:")
+    T = lambda owner, thema, status=" ": aufgaben.Task(status=status, text="x", owner=owner, topics=[thema] if thema else [])   # noqa: E731
+    eq([rollen.sichtbar(T(*a), "ich", r) for a in (("ich", "rolle-kind"), ("rita", "rolle-kind"), ("rita", "rolle-frei"),
+                                                    ("rita", "ohne-seite"), ("rita", ""))],
+       [True, False, True, True, True], "meine immer; die anderer nur, wo ich fuehre:")
+    ok(rollen.sichtbar(T("rita", "rolle-kind"), "ich", r, {"rita"}), "wer an mich berichtet, bleibt sichtbar")
+    punkte = ([T("ich", "rolle-frei")] * 3 + [T("rita", "rolle-frei")] * 3 + [T("rita", "rolle-kind", "x")] * 4
+              + [T("ich", "rolle-enkel")] + [T("rita", "rolle-enkel")] * 9)
+    with _AttrGuard(aufgaben, scan=lambda: punkte), _AttrGuard(vault_paths, ich=lambda: "ich"):
+        v = {x["slug"]: x for x in rollen.vorschlaege()}
+        eq((v["rolle-frei"]["vorschlag"], v["rolle-frei"]["grund"]), ("fuehre", "3 von 6 Punkten sind deine"), "hoher Anteil:")
+        eq((v["rolle-kind"]["vorschlag"], v["rolle-enkel"]["vorschlag"], v["rolle-meins"]["vorschlag"]),
+           ("beobachte", "beteiligt", "fuehre"), "nie ein eigener Punkt / wenige / verantwortlich:")
+        eq(rollen.setzen({"rolle-frei": "beteiligt", "rolle-dach": "", "gibt-es-nicht": "fuehre", "rolle-kind": "chef"}),
+           {"ok": False, "geaendert": ["rolle-frei", "rolle-dach"], "unbekannt": ["gibt-es-nicht", "rolle-kind"]}, "setzen:")
+    r = rollen.lade()
+    eq((r["rolle-frei"], r["rolle-dach"], r["rolle-kind"]), ("beteiligt", "fuehre", "fuehre"), "geschrieben und herausgenommen:")
+    ok("title: rolle-frei" in (d / "rolle-frei.md").read_text(encoding="utf-8"), "das uebrige Frontmatter bleibt")
+
+
+def t_pruefung_parkt_verstummtes():
+    """Ein Punkt eines anderen, der in den naechsten zwei nachbereiteten Terminen der Reihe nicht mehr
+    vorkommt, wird geparkt - nicht der eigene, nicht mit Frist, nicht der spaeter wieder genannte."""
+    import aufgaben
+    import pruefung
+    import vault_paths
+    from datetime import date as _date
+    m = _VAULT / "active-meetings"
+    m.mkdir(parents=True, exist_ok=True)
+    P = lambda text, owner, due=None: aufgaben.render(aufgaben.Task(status=" ", text=text, owner=owner, due=due))   # noqa: E731
+
+    def notiz(tag, status, punkte, mitschrift):
+        (m / f"{tag} - Hallenrunde Pruef.md").write_text(
+            f"---\ntype: meeting\ntitle: Hallenrunde Pruef\ndate: {tag}\nstatus: {status}\nseries: hallenrunde-pruef\n---\n"
+            f"# Hallenrunde Pruef\n\n## Mitschrift\n{mitschrift}\n\n## Actions\n" + "\n".join(punkte) + "\n", encoding="utf-8", newline="\n")
+
+    notiz("2026-09-01", "nachbereitet",
+          [P("Regalplan fuer die Nordhalle zeichnen", "rita-pruef"), P("Wartung der Gabelstapler beauftragen", "rita-pruef"),
+           P("Schichtplan mit dem Betriebsrat abstimmen", "ich"), P("Brandschutz begehen lassen", "rita-pruef", due="2026-12-01")],
+          "Rita zeichnet den Regalplan.")
+    notiz("2026-09-08", "nachbereitet", [P("Etiketten nachbestellen", "rita-pruef")], "Es ging um die Inventur und sonst nichts.")
+    notiz("2026-09-15", "done", [], "Die Wartung der Gabelstapler ist beauftragt, der Dienstleister kommt naechste Woche.")
+    notiz("2026-09-22", "vorbereitet", [], "")
+    heute = _date(2026, 9, 20)
+    with _AttrGuard(vault_paths, ich=lambda: "ich"):
+        v = pruefung.verstummte(heute)
+        eq([a["text"] for a in v], ["Regalplan fuer die Nordhalle zeichnen"], "nur der verstummte Punkt eines anderen:")
+        ok("in den folgenden 2 Terminen der Reihe nicht mehr genannt ([[2026-09-08 - Hallenrunde Pruef]], "
+           "[[2026-09-15 - Hallenrunde Pruef]])" in v[0]["vermerk"], f"der Vermerk nennt die Termine: {v[0]['vermerk']}")
+        r = pruefung.run(heute=heute)
+    text = (m / "2026-09-01 - Hallenrunde Pruef.md").read_text(encoding="utf-8")
+    ok("- [-] Regalplan fuer die Nordhalle zeichnen" in text and "\n    - Geparkt am 20.09.2026" in text, f"geparkt mit Vermerk:\n{text}")
+    ok(text.count("- [ ] ") == 3 and r["verstummt"] == 1 and not r["mit_modell"], f"die anderen drei bleiben offen: {r}")
+    bericht = (_VAULT / pruefung.BERICHT).read_text(encoding="utf-8")
+    ok("## 20.09.2026 – " in bericht and "**geparkt (verstummt):** Regalplan" in bericht, f"im Bericht:\n{bericht}")
+    with _AttrGuard(vault_paths, ich=lambda: "ich"):
+        eq(pruefung.verstummte(heute), [], "ein zweiter Lauf findet nichts mehr:")
+
+
+def t_pruefung_schliesst_nur_mit_beleg():
+    """Das Modell nennt, was laut Log erledigt oder ueberholt ist - geschlossen wird nur, wenn der Eintrag
+    nicht aelter ist als der Punkt und der Beleg woertlich darin steht."""
+    import aufgaben
+    import pruefung
+    import vault_paths
+    from datetime import date as _date
+    d = _VAULT / "entities" / "projects"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "pruef-thema.md"
+    f.write_text("---\ntype: project\ntitle: Pruef-Thema\n---\n# Pruef-Thema\n\n## Offene Punkte\n"
+                 "- [ ] Angebot fuer die Rampe einholen ➕ 2026-09-01\n"
+                 "    - Beleg: „bleibt darunter stehen“\n"
+                 "- [ ] Pilot in der Suedhalle starten ➕ 2026-09-02\n"
+                 "- [ ] Schulung planen ➕ 2026-09-03\n"
+                 "- [ ] Erfundenes pruefen ➕ 2026-09-04\n"
+                 "- [ ] Zu frueh belegt ➕ 2026-09-20\n\n## Event Log\n"
+                 "- [2026-09-10] [STATUS] Das Angebot fuer die Rampe liegt vor, zwei Anbieter haben geantwortet.\n"
+                 "- [2026-09-12] [DECISION] Der Pilot in der Suedhalle entfaellt, die Halle wird umgebaut.\n"
+                 "- [2026-09-14] [STATUS] Ueber die Schulung wurde gesprochen.\n", encoding="utf-8", newline="\n")
+    gefragt = []
+
+    def modell_antwort(messages, schema, **kw):
+        gefragt.append(messages[1]["content"])
+        zeilen = messages[1]["content"].split("Log-Einträge:")
+        nr = lambda teil, wort: next((int(l.split(".")[0]) for l in teil.splitlines() if wort in l), 98)   # noqa: E731
+        p, e = zeilen
+        return {"urteile": [
+            {"punkt": nr(p, "Angebot"), "urteil": "erledigt", "eintrag": nr(e, "Angebot"), "beleg": "Das Angebot fuer die Rampe liegt vor"},
+            {"punkt": nr(p, "Pilot"), "urteil": "ueberholt", "eintrag": nr(e, "Pilot"), "beleg": "Der Pilot in der Suedhalle entfaellt"},
+            {"punkt": nr(p, "Schulung"), "urteil": "offen", "eintrag": nr(e, "Schulung"), "beleg": "Ueber die Schulung wurde gesprochen"},
+            {"punkt": nr(p, "Erfundenes"), "urteil": "erledigt", "eintrag": nr(e, "Schulung"), "beleg": "Das wurde komplett abgeschlossen"},
+            {"punkt": nr(p, "Zu frueh"), "urteil": "erledigt", "eintrag": nr(e, "Angebot"), "beleg": "Das Angebot fuer die Rampe liegt vor"},
+            {"punkt": 99, "urteil": "erledigt", "eintrag": 0, "beleg": "Das Angebot fuer die Rampe liegt vor"},
+        ]}, {}
+
+    heute = _date(2026, 9, 25)
+    with _AttrGuard(vault_paths, ich=lambda: "ich"), _AttrGuard(pruefung, THEMEN_JE_LAUF=50):
+        r = pruefung.run(llm_call=modell_antwort, heute=heute)
+    text = f.read_text(encoding="utf-8")
+    ok("- [x] Angebot fuer die Rampe einholen ➕ 2026-09-01 ✅ 2026-09-10\n"
+       "    - Erledigt laut Log vom 10.09.2026: „Das Angebot fuer die Rampe liegt vor“" in text
+       and "    - Beleg: „bleibt darunter stehen“" in text, f"erledigt mit dem Datum des Eintrags und dem Beleg:\n{text}")
+    ok("- [-] Pilot in der Suedhalle starten" in text and "    - Überholt laut Log vom 12.09.2026" in text, f"ueberholt = verworfen:\n{text}")
+    ok("- [ ] Schulung planen" in text and "- [ ] Erfundenes pruefen" in text and "- [ ] Zu frueh belegt" in text,
+       f"offen, erfundener Beleg, Eintrag aelter als der Punkt: bleibt\n{text}")
+    eq((r["erledigt"], r["ueberholt"], r["mit_modell"]), (1, 1, True), "gezaehlt:")
+    n = len(gefragt)
+    with _AttrGuard(vault_paths, ich=lambda: "ich"), _AttrGuard(pruefung, THEMEN_JE_LAUF=50):
+        pruefung.run(llm_call=modell_antwort, heute=heute)
+    ok(len(gefragt) == n, f"ein Thema, an dem sich nichts geaendert hat, wird nicht noch einmal gefragt ({n} -> {len(gefragt)})")
+
+
 # ───────────────────────────────────────── 13. Jourfix nach Richtung
 
 def t_jourfix_nach_richtung():
@@ -1141,6 +1270,9 @@ def t_jourfix_nach_richtung():
 # ───────────────────────────────────────── main
 
 TESTS = [
+    ("rollen: vererben, ausblenden, Vorschlag aus den Punkten, eintragen", t_rollen_vererben_und_blenden_aus),
+    ("pruefung: verstummt in den naechsten Terminen der Reihe -> geparkt", t_pruefung_parkt_verstummtes),
+    ("pruefung: erledigt/ueberholt nur mit woertlichem Beleg aus einem juengeren Eintrag", t_pruefung_schliesst_nur_mit_beleg),
     ("vorbereiten: Jourfix nach Richtung - laengst offen, ich schulde, zum Uebergeben", t_jourfix_nach_richtung),
     ("stand: Delta-Zeilen, Risiken in Gruppen, Beteiligte eingeklappt", t_stand_delta_und_risiko_gruppen),
     ("briefing: keine Schablonenfrage, Begruendung ohne Wiederholung, hoechstens sechs", t_briefing_ohne_schablone),

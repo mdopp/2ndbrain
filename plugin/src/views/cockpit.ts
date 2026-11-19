@@ -51,7 +51,10 @@ export class CockpitBlock extends MarkdownRenderChild {
       return;
     }
     const today = localIsoDate();
-    const c = cockpitTasks(this.plugin.tasks, this.plugin.selfSlug, today);
+    // Punkte anderer nur aus Themen, die ich fuehre (core/rollen.ts) - die eigenen bleiben immer
+    const sicht = this.plugin.nachfassTasks;
+    const weg = this.plugin.tasks.length - sicht.length;
+    const c = cockpitTasks(sicht, this.plugin.selfSlug, today);
 
     el.createEl("h2", { text: `Meine Aufgaben (${c.mineCount})` });
     for (const b of c.mine) {
@@ -61,6 +64,8 @@ export class CockpitBlock extends MarkdownRenderChild {
     if (!c.mineCount) el.createEl("p", { text: "Nichts offen." });
 
     el.createEl("h2", { text: `Nachfassen – was andere zugesagt haben (${c.othersCount} bei ${c.others.length} Personen)` });
+    if (weg) el.createEl("p", { cls: "sb-muted", text: `${weg} Punkte aus Themen, die du nicht führst, sind ausgeblendet `
+      + "(Befehl „Meine Rolle je Thema“)." });
     await this.perPerson(el, c.others, "", today);
 
     el.createEl("h2", { text: `Fragen (${c.questionsCount})` });

@@ -88,7 +88,8 @@ export const SCHRITT_NAMEN: Record<string, string> = {
   kalender: "Kalender", mails: "Eingang (Mails, Dateien)", nachziehen: "Nachziehen", protokolle: "Protokolle",
   einarbeiten: "Einarbeiten", wissen: "Wissen (Begriffe, Glossar)", vorbereiten: "Vorbereiten",
   nachbereiten: "Nachbereiten", themenlog: "Themen-Log", rueckfragen: "Rückfragen", schreibweisen: "Schreibweisen",
-  altbestand: "Altbestand", archivieren: "Archivieren", verdichten: "Verdichten", stand: "Stand der Themen",
+  altbestand: "Altbestand", archivieren: "Archivieren",
+  pruefen: "Offene Punkte prüfen", verdichten: "Verdichten", stand: "Stand der Themen",
   fokus: "Fokus-Spiegel", systemuebersicht: "Systemübersicht", personen: "Personen",
 };
 

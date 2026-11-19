@@ -4,8 +4,9 @@ import type SecondBrainPlugin from "./main";
 import type { Wartend } from "./core/nacherfassen";
 import type { SkillRecipe } from "./core/rezepte";
 import { CAL_CONFIG, Json, LLM_CONFIG, LOCAL_CONFIG, PROTOKOLL_VORLAGE, calendarSourceKind, getPath } from "./konfiguration";
-import { ABLEITUNG_STAND, angebotFaellig, neuaufbauZeilen, startKnopf } from "./core/neuaufbau";
+import { ABLEITUNG_STAND, angebotFaellig, neuaufbauZeilen } from "./core/neuaufbau";
 import { NeuaufbauModal } from "./views/neuaufbau";
+import { RollenModal } from "./views/rollen";
 
 /** Kopie der Vault-Konfiguration fuer Geraete, auf denen .2ndbrain/ fehlt (Handy):
  *  der Desktop schreibt sie, die Plugin-Daten synchronisieren sie mit. */
@@ -187,10 +188,19 @@ export class SecondBrainSettingTab extends PluginSettingTab {
       .setName(faellig ? "Neuaufbau empfohlen" : "Neuaufbau")
       .setDesc(neuaufbauZeilen(stand).map((z) => z.text).join(" · "));
     s.addButton((b) => {
-      b.setButtonText(startKnopf(stand, this.plugin.neuaufbauLaeuft) + " …");
+      // oeffnet nur das Fenster - dort stehen Fortsetzen, Neu beginnen, Beenden. "Fortsetzen …" hier las sich,
+      // als gaebe es nur das (Rueckmeldung 18.11.2026).
+      b.setButtonText("Fenster öffnen …");
       if (faellig) b.setCta();
       b.onClick(() => new NeuaufbauModal(this.app, this.plugin).open());
     });
+    new Setting(el).setName("Meine Rolle je Thema")
+      .setDesc("Führe ich das Thema, bin ich beteiligt, beobachte ich nur? Danach richtet sich, wessen offene Punkte in "
+        + "„Nachfassen“, im Lagebild und im Jourfix stehen. Das Plugin schlägt je Thema eine Rolle vor.")
+      .addButton((b) => {
+        b.setButtonText("Rollen festlegen …");
+        b.onClick(() => new RollenModal(this.app, this.plugin).open());
+      });
   }
 
   // --------------------------------------------- Vault-Konfiguration (.2ndbrain)

@@ -72,10 +72,10 @@ LOCK_MAX_AGE_S = 30 * 60
 INTERVAL_MIN = {"kalender": 360, "mails": 0, "protokolle": 0, "einarbeiten": 0, "wissen": 0, "vorbereiten": 60,
                 "nachbereiten": 0, "themenlog": 0,
                 "rueckfragen": 0, "schreibweisen": 0, "altbestand": 0, "archivieren": 0, "verdichten": 43200, "stand": 0,
-                "fokus": 60, "systemuebersicht": 1440, "personen": 1440}
+                "pruefen": 360, "fokus": 60, "systemuebersicht": 1440, "personen": 1440}
 ORDER = ("kalender", "mails", "nachziehen", "protokolle", "einarbeiten", "wissen", "vorbereiten", "nachbereiten",
          "themenlog", "rueckfragen",
-         "schreibweisen", "altbestand", "archivieren",
+         "schreibweisen", "altbestand", "archivieren", "pruefen",
          "verdichten",
          "stand", "fokus", "systemuebersicht", "personen")
 
@@ -371,6 +371,21 @@ def step_archivieren(ctx: dict) -> dict:
     return {"ok": True, "detail": detail, "changed": len(r["archiviert"])}
 
 
+def step_pruefen(ctx: dict) -> dict:
+    """Offene Punkte pruefen und selbst raeumen (pruefung.py): verstummt -> geparkt; laut Log erledigt
+    oder ueberholt -> geschlossen. Grund an der Quelle, Liste in reports/geprueft.md."""
+    import pruefung
+    llm_call = None
+    if ctx["llm_ok"]:
+        import modell
+        llm_call = modell.complete_json
+    r = pruefung.run(llm_call=llm_call, dry_run=ctx["dry_run"])
+    detail = (f"{r['verstummt']} verstummt geparkt, {r['erledigt']} erledigt, {r['ueberholt']} überholt, "
+              f"{r['altbestand']} alter Altbestand geparkt"
+              + ("" if llm_call else " (ohne Modell: nur „verstummt“)"))
+    return {"ok": True, "changed": 0 if ctx["dry_run"] else r["geaendert"], "detail": detail}
+
+
 def step_verdichten(ctx: dict) -> dict:
     """Monatlich: erledigte Punkte und altes Log ins Themen-Archiv (verdichten.py)."""
     import verdichten
@@ -442,7 +457,8 @@ def step_personen(ctx: dict) -> dict:
 STEPS = {"kalender": step_kalender, "mails": step_mails, "nachziehen": step_nachziehen, "protokolle": step_protokolle,
          "einarbeiten": step_einarbeiten, "wissen": step_wissen, "vorbereiten": step_vorbereiten,
          "nachbereiten": step_nachbereiten, "themenlog": step_themenlog, "rueckfragen": step_rueckfragen, "schreibweisen": step_schreibweisen,
-         "altbestand": step_altbestand, "archivieren": step_archivieren, "verdichten": step_verdichten,
+         "altbestand": step_altbestand, "archivieren": step_archivieren, "pruefen": step_pruefen,
+         "verdichten": step_verdichten,
          "stand": step_stand, "fokus": step_fokus, "systemuebersicht": step_systemuebersicht,
          "personen": step_personen}
 

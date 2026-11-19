@@ -682,6 +682,8 @@ Befehle deutsch; das Plugin folgt bei den Dateinamen, im Code selbst stehen engl
 | Schreibweise (Verschreiber eines Namens) | Feld `schreibweisen:`, `reports/schreibweisen-review.md` | `schreibweisen` | `schreibweisen.py` | – |
 | Automatik | `.2ndbrain/daten/.auto_state.json`, `auto_letzter_lauf.json` | `auto` | `auto.py` | `main.ts`, `core/automatik.ts`, `views/automatik.ts` |
 | Fokus, Nordstern, Fokus-Spiegel | Felder `fokus`, `ziel`, `target_date`; `reports/fokus-spiegel.md` | `fokus` | `fokus.py` | `core/fokus.ts`, `views/fokus.ts` |
+| Rolle je Thema | Feld `meine_rolle` | `rollen` | `rollen.py` | `core/rollen.ts`, `views/rollen.ts` |
+| Offene Punkte prüfen (verstummt, erledigt laut Log) | `reports/geprueft.md`, `.2ndbrain/daten/pruefung_state.json` | `pruefen` | `pruefung.py` | – |
 | Befehlszeile | – | `help` | `befehle.py` | `desktop/engine.ts` |
 
 ## 24. Wenig vorlegen: Stand als Delta, Briefing ohne Schablone, Lagebild
@@ -711,7 +713,41 @@ geändert hat (Befund 17.11.2026 am eigenen Vault: 13 Briefing-Zeilen mit dersel
   Kontext in der Ampelfarbe des Themas dahinter (über die Subdomäne oder `atlas_id`).
 - **Altbestand auslaufen lassen.** `2ndbrain altbestand --parken` zeigt, welche ungeprüften Alt-Punkte älter als
   60 Tage, ohne Frist und ohne Fokus sind; mit `--anwenden` werden sie `[-]` mit dem Vermerk „Geparkt am …“ –
-  aus allen Sichten, nicht gelöscht. Nie automatisch.
+  aus allen Sichten, nicht gelöscht. Seit 0.13.5 auch in der Automatik (Schritt `pruefen`, §25) – bis dahin
+  bewusst nur von Hand; die Entscheidung vom 19.11.2026 lautet: die Automatik darf selbst räumen.
+
+## 25. Offene Punkte prüfen: Rolle je Thema, verstummt, erledigt laut Log
+
+Ein Punkt bleibt offen, bis ihn jemand abhakt – und das tut selten jemand (Befund 19.11.2026 am eigenen Vault:
+611 offene Punkte, davon 127 eigene; wortgleiche Dubletten und „schon erledigt“ fand der Code so gut wie
+keine – was zu viel ist, steht anders formuliert im Log oder gehört jemand anderem).
+
+- **Meine Rolle je Thema** (`rollen.py`, im Plugin `core/rollen.ts` und „Meine Rolle je Thema“). Feld
+  `meine_rolle:` im Frontmatter des Themas: `fuehre` (alle offenen Punkte, auch die der anderen), `beteiligt`
+  (nur die eigenen), `beobachte` (keine Punkte anderer). Ein Unterthema ohne Angabe erbt die des Dachs, ohne
+  jede Angabe gilt `fuehre`. Die Rolle blendet aus, sie löscht nichts: in „Nachfassen“ (Heute, Cockpit), im
+  Lagebild und in „Bei X am längsten offen“ des Jourfix. Die eigenen Punkte bleiben immer; in den Berichten
+  der Engine auch die der Personen, die laut Organisation an mich berichten. Den Vorschlag rechnet der Code
+  ohne Modell: Fokus-Thema, als `verantwortlich` eingetragen oder mindestens 40 % eigene Punkte (ab fünf
+  Punkten) = `fuehre`; nie ein eigener Punkt = `beobachte`; sonst `beteiligt`. Das Fenster im Plugin zeigt vor
+  dem Speichern, wie viele Punkte anderer die Auswahl ausblendet. Themen-Seite, Sofortsuche und Chat zeigen
+  weiter alles.
+- **Verstummt** (`pruefung.py`, ohne Modell). Ein Punkt eines anderen aus einer Reihe, der in den nächsten
+  zwei abgeschlossenen Terminen dieser Reihe weder in der Mitschrift noch in Actions oder Entscheidungen
+  vorkommt (`nachbereiten.fundstelle`), wird geparkt. Ohne Reihe zählen die nächsten drei Termine desselben
+  Themas. Nie: eigene Punkte (die legt die Triage vor), Punkte mit Frist, Fokus-Themen, ungeprüfter Altbestand.
+- **Erledigt oder überholt laut Log** (`pruefung.py`, mit Modell). Je Thema bekommt das Modell die offenen
+  Punkte und die Log-Einträge (STATUS, DECISION, MILESTONE), die danach kamen, und nennt Punkt, Eintrag und
+  einen Belegsatz. Der Code schließt nur, wenn der Eintrag nicht älter ist als der Punkt und der Beleg
+  wörtlich (mindestens drei Wörter) darin steht: erledigt = `[x]` mit dem Datum des Eintrags, überholt = `[-]`.
+  Je Lauf höchstens vier Themen, die mit den meisten Punkten zuerst; ein Thema, an dem sich nichts geändert
+  hat, wird nicht noch einmal gefragt (`.2ndbrain/daten/pruefung_state.json`).
+- **Selbst räumen, nachvollziehbar.** Schritt `pruefen` der Automatik (alle sechs Stunden, `2ndbrain pruefen`).
+  Jede Änderung steht an der Quelle als Unterpunkt („Erledigt laut Log vom … – automatisch geprüft“, „Geparkt
+  am …“) und in `reports/geprueft.md` (jüngster Lauf oben). Zurücknehmen: das Kästchen wieder leeren.
+- **Gröber schneiden.** Die Nachbereitung nennt das Ergebnis, das am Ende vorliegen soll, nicht jeden Handgriff
+  dorthin; mehrere Aufgaben derselben Person zum selben Gegenstand sind eine (`AUFGABEN_REGEL`).
+- **Bewusst nicht gebaut:** andere Quellen als führend (Ticket-System, Planner) – zurückgestellt am 19.11.2026.
 
 ## 23. Triage: was mache ich mit meinen offenen Punkten?
 

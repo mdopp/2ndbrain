@@ -25,6 +25,8 @@ import { CaptureModal, WrapupResultModal } from "./views/nacherfassen";
 import { AutomatikModal } from "./views/automatik";
 import { NeuaufbauModal } from "./views/neuaufbau";
 import { TriageModal } from "./views/triage";
+import { RollenModal } from "./views/rollen";
+import { rollenVon, sichtbare } from "./core/rollen";
 import { TriageErgebnis, TriagePunkt, Vorschlag, anwendenArgs } from "./core/triage";
 import {
   ABLEITUNG_STAND, NeuaufbauStand, ableitungBeimStart, angebotFaellig, neuaufbauAuswerten, neuaufbauMeldung, startArgs,
@@ -473,6 +475,8 @@ export default class SecondBrainPlugin extends Plugin {
     this.addCommand({ id: "fokus-spiegel-neu", name: "Fokus-Spiegel jetzt erstellen", callback: () => void this.spiegelNeu() });
     this.addCommand({ id: "triage", name: "Meine Woche: offene Punkte einordnen (Triage)",
                       callback: () => new TriageModal(this.app, this).open() });
+    this.addCommand({ id: "rollen", name: "Meine Rolle je Thema (führe, beteiligt, beobachte)",
+                      callback: () => new RollenModal(this.app, this).open() });
     this.addCommand({ id: "neuaufbau", name: "Alles neu aufbauen (in einer Kopie neben dem Vault)",
                       callback: () => new NeuaufbauModal(this.app, this).open() });
     this.addCommand({ id: "open-system-overview", name: "Systemübersicht öffnen (LikeC4)",
@@ -762,6 +766,12 @@ export default class SecondBrainPlugin extends Plugin {
       }
     }
     this.updateStatus();
+  }
+
+  /** Die offenen Punkte fuer „Nachfassen“: meine eigenen und die anderer nur aus Themen, die ich fuehre
+   *  (`meine_rolle`, core/rollen.ts). Alles andere (Thema, Person, Chat) rechnet weiter mit `tasks`. */
+  get nachfassTasks(): TaskInfo[] {
+    return sichtbare(this.tasks, this.selfSlug, rollenVon(this.index.topics()));
   }
 
   /** Offene Punkte (src/core/aufgaben.ts) - in Millisekunden, ohne Python. */

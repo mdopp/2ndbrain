@@ -246,7 +246,8 @@ def bericht(heute: date | None = None) -> str:
     org = organisation.lade()
     tasks = tk.scan()
     themen = themen_lage(heute)
-    z = zusagen(tasks, ich, heute)
+    import rollen                      # Punkte anderer nur aus Themen, die ich fuehre (oder von meinen Berichten)
+    z = zusagen(rollen.sichtbare(tasks, ich, immer=set(org.alle_berichte(ich)) if ich else set()), ich, heute)
     haengt = [r for r in z if r["typisch"] is not None and r["typisch"] >= ALT_AB_TAGEN and r["offen"] >= 3]
     out = ["# Lagebild", "",
            f"_Stand {heute.strftime('%d.%m.%Y')} – erzeugt von `2ndbrain lagebild` und bei jedem Lauf ersetzt. Drei Bilder, "
@@ -256,7 +257,8 @@ def bericht(heute: date | None = None) -> str:
     if haengt:
         out += ["", "**Hängt:** " + ", ".join(f"[[{r['person']}|{org.name(r['person'])}]] ({r['offen']} offen, typisch {r['typisch']} Tage alt)"
                                                for r in haengt[:5]) + " – das Gespräch, das ansteht."]
-    out += ["", "_Fett: typisch 30 Tage und älter. Ungeprüfter Altbestand zählt nicht mit._", "",
+    out += ["", "_Fett: typisch 30 Tage und älter. Ungeprüfter Altbestand zählt nicht mit; aus Themen, die du nicht führst, "
+            "zählen nur die Punkte deiner Berichte (Rolle je Thema: Einstellungen → 2ndBrain)._", "",
             "## Wo liegt viel und bewegt sich nichts?", ""]
     out += radar(themen)
     bezug = next((t["bezug"] for t in themen if t.get("bezug")), heute.isoformat())

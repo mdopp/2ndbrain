@@ -16,7 +16,7 @@ Aufgaben, Log, Risiken und Nacherfassen gibt es auch in der Engine (sie braucht 
 Schritte); `2ndbrain plugin-vergleich` prüft auf dem Vault, dass beide dasselbe liefern (nur lesend).
 Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Handy.
 
-## Was es kann (0.13.4)
+## Was es kann (0.13.5)
 
 | Funktion | Handy | Desktop | Modell nötig? |
 |---|---|---|---|
@@ -33,6 +33,8 @@ Das Lesen und den Chat rechnet immer das Plugin selbst – am Desktop wie am Han
 | **Offene Fragen** (Kanon, Systemübersicht) im Chat – der einzige Chat-Teil, der die Engine braucht | – | ja | nein |
 | **Thema zuordnen**, **Mit wem?**, Liste *Ohne Thema* | – | ja | nein |
 | **Automatik**: `2ndbrain auto` alle N Minuten; nach einem Update zieht sie alte Notizen im Hintergrund nach (*Heute* zeigt den Stand). „mit Fehlern“ in *Heute* öffnet den letzten Lauf: gescheiterte Schritte mit ganzer Meldung, Ausweg und Stelle im Code, *Bericht kopieren*, *Noch einmal laufen lassen* | – | ja | teils |
+| **Meine Rolle je Thema** (führe, beteiligt, beobachte): Vorschlag je Thema aus den Punkten, mit Vorschau, wie viele Punkte anderer die Auswahl aus *Nachfassen* ausblendet | ja | ja | nein |
+| **Offene Punkte prüfen**: die Automatik parkt Verstummtes und alten Altbestand und schließt, was das Themen-Log als erledigt oder überholt belegt – mit Vermerk an der Quelle und Liste in `reports/geprueft.md` | lesen | ja | teils |
 | **Mails**: Absender und Empfänger als Verweise auf die Personen, Verteiler für sich; zählen für die Beteiligten eines Themas; im Chat als eigene Art („Welche Mails kamen von X?“) | ja | ja | nein |
 | **Systemübersicht (LikeC4)** | – | ja | nein |
 

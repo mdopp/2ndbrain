@@ -135,6 +135,8 @@ export class VaultIndex {
         parent: stripLink(str(fm.parent)).split("|")[0].trim(),
         fokus: fokusRang(fm.fokus), ziel: str(fm.ziel).replace(/\s+/g, " ").trim(),
         zieltermin: isoTag(fm.target_date), zuletztBewegt: isoTag(fm.zuletzt_bewegt),
+        rolle: str(fm.meine_rolle).trim().toLowerCase(),
+        verantwortlich: stripLink(str(fm.verantwortlich)).split("|")[0].trim(),
       };
     });
   }

@@ -43,6 +43,8 @@ GRUPPEN = [
         ("nacherfassen", "nacherfassen", [], "Termin nacherfassen (--note <pfad> --stdin | --entfallen | --wieder-offen |\n"
                                               "--undo | --info) - das Plugin erfasst selbst, hier Rueckgaengig"),
         ("altbestand", "altbestand", [], "Altbestand je Thema und naechster Termin (--settle | --geprueft <slug>)"),
+        ("pruefen", "pruefung", [], "offene Punkte pruefen und selbst raeumen: verstummt (in den naechsten Terminen der\n"
+                                    "Reihe nicht mehr genannt), erledigt/ueberholt laut Log (--ohne-modell | --dry-run | --json)"),
         ("archivieren", "archivieren", [], "erledigte Termin-Notizen abschliessen und nach archive/meetings/ (--dry-run | --json)"),
         ("protokolle", "protokolle", [], "Protokolle im Eingang ihrem Termin zuordnen, unklar -> Rueckfrage (--dry-run | --json)"),
         ("schreibweisen", "schreibweisen", [], "Namen sauber: --liste (Startliste), --antworten, --bereinigen [--vorschau], --text"),
@@ -73,6 +75,8 @@ GRUPPEN = [
         ("beteiligte", "beteiligte", [], "Beteiligte je Thema berechnen (--topic --json)"),
         ("fokus", "fokus", [], "Fokus-Themen mit Zahlen der letzten 7 Tage (--json);\n"
                                "--spiegel [--neu]: Fokus-Spiegel dieser Woche nach reports/fokus-spiegel.md"),
+        ("rollen", "rollen", [], "meine Rolle je Thema (fuehre | beteiligt | beobachte) mit Vorschlag aus den Daten\n"
+                                  "(--json | --uebernehmen | --setzen: JSON {slug: rolle} von stdin | --dry-run)"),
         ("personen", "personen", [], "Ueberblick je Person erzeugen (--dry-run | --slug <person> | --json)"),
         ("orgchart", "organisation", [], "Organisation: reports/orgchart.md mit Bild der eigenen Linie und Pflegeliste\n"
                                          "(--person <slug>: Linie und Verhaeltnis zu mir | --json | --dry-run)"),

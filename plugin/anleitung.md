@@ -259,6 +259,29 @@ An wen du übergeben kannst, steht in `.2ndbrain/local.config.json` unter `deleg
 (z. B. „architekt“ – alle mit dieser Rolle), `personen` (einzelne dazu), `gruppen` (leer = alle Teams
 und Reihen). Die eigene Linie kommt aus der Organisation.
 
+## Sind die offenen Punkte wirklich noch offen?
+
+**Meine Rolle je Thema.** Nicht jedes Thema, in dessen Terminen du sitzt, führst du. Befehl „Meine Rolle je
+Thema“ (oder Einstellungen → 2ndBrain → „Rollen festlegen …“): 2ndBrain schlägt je Thema eine Rolle vor, du
+korrigierst und speicherst.
+
+- **führe ich** – alle offenen Punkte, auch die der anderen.
+- **bin beteiligt** – nur deine eigenen Punkte.
+- **beobachte ich** – keine Punkte anderer; Stand, Entscheidungen und Risiken bleiben.
+
+Die Rolle blendet in „Nachfassen“, im Lagebild und im Jourfix aus – gelöscht wird nichts, und auf der
+Themen-Seite steht weiter alles. Ein Unterthema ohne eigene Rolle nimmt die des Oberthemas.
+
+**Die Automatik räumt selbst** (Schritt „Offene Punkte prüfen“, alle sechs Stunden):
+
+- Ein Punkt eines anderen, der in den nächsten zwei Terminen der Reihe nicht mehr vorkam, wird geparkt.
+- Ein Punkt, den ein späterer Eintrag im Themen-Log als erledigt oder überholt ausweist, wird geschlossen –
+  nur mit einem wörtlichen Satz aus diesem Eintrag als Beleg (braucht das Modell).
+- Ungeprüfter Altbestand, älter als 60 Tage und ohne Frist, wird geparkt.
+
+Deine eigenen Punkte, Punkte mit Frist und Fokus-Themen parkt sie nie. Was sie getan hat, steht in
+`reports/geprueft` und als Unterpunkt an der Stelle selbst. Zurücknehmen: das Kästchen wieder leeren (`[ ]`).
+
 ## Organisation und Lagebild
 
 - `reports/orgchart` – deine Linie als Bild, mit den offenen Zusagen je Person, und die Liste der

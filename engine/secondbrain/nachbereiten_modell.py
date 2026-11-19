@@ -122,7 +122,10 @@ FRISTEN_REGEL = ("Frist (bis) nur, wenn das Material sie fuer genau diese Aufgab
 AUFGABEN_REGEL = (
     "Aufgaben (actions): Eine Aufgabe ist EINE Zusage oder EIN Auftrag, als vollstaendiger Satz, der "
     "ohne den Rest des Protokolls verstaendlich ist - Teilschritte und Nebensaetze derselben Zusage "
-    "gehoeren in dieselbe Aufgabe, dieselbe Zusage steht nur einmal da. wer = die Person, die es tut, "
+    "gehoeren in dieselbe Aufgabe, dieselbe Zusage steht nur einmal da. Schneide grob: genannt wird "
+    "das Ergebnis, das am Ende vorliegen soll, nicht jeder Handgriff dorthin (\"Termin suchen, einladen, "
+    "Unterlagen schicken\" ist EINE Aufgabe: die Abstimmung); mehrere Aufgaben derselben Person zum "
+    "selben Gegenstand sind eine. wer =die Person, die es tut, "
     "mit dem Namen aus dem Material (nie ein Ort, ein Raum, ein Team oder mehrere Personen; unklar = "
     "leer). art: \"zusage\" = eine genannte Person hat es zugesagt oder den Auftrag bekommen; "
     "\"absicht\" = es soll geschehen, aber niemand hat es uebernommen (\"man muesste\", \"sollte "

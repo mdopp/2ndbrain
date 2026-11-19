@@ -352,7 +352,7 @@ export class TodayView extends ItemView {
     // Zweite Zeile: Themen mit Ampel (oder "Thema wählen"), Altbestand, Nachfassen
     const ts = (m.topics ?? (m.topic ? [m.topic] : []))
       .map((s) => topics.get(s)).filter((x): x is TopicInfo => !!x);
-    const fus = followUps(this.plugin.tasks, m.persons, this.plugin.selfSlug, today, 99);
+    const fus = followUps(this.plugin.nachfassTasks, m.persons, this.plugin.selfSlug, today, 99);
     const meta = card.createDiv({ cls: "sb-meeting-meta" });
     const pick = () => this.plugin.openTopicPicker({ kind: "note", path: m.path });
     const desk = this.plugin.isDesktop;       // Thema und Gegenueber setzt die Engine

@@ -764,7 +764,8 @@ def _richtung(person: str, name: str, key: str, themen_der_person: set[str], tod
     mit vollem Namen, oder nennt ihren Vornamen in einem Thema, an dem sie beteiligt ist - ein
     Vorname allein ordnet nie zu."""
     first = name.split()[0] if name else person
-    alle = [t for t in tk.scan() if t.is_open and t.kind == tk.KIND_TASK]
+    import rollen                      # ihre Punkte nur aus Themen, die ich fuehre - oder sie berichtet an mich
+    alle = rollen.sichtbare([t for t in tk.scan() if t.is_open and t.kind == tk.KIND_TASK], self_slug)
 
     def alter(t: tk.Task) -> str:
         try:

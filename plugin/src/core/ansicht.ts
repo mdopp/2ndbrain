@@ -56,6 +56,8 @@ export interface TopicInfo {
   ziel?: string;           // `ziel:` - woran merke ich, dass es geschafft ist
   zieltermin?: string;     // `target_date` (YYYY-MM-DD) oder ""
   zuletztBewegt?: string;  // zuletzt_bewegt (stand.py)
+  rolle?: string;          // `meine_rolle`: fuehre | beteiligt | beobachte (core/rollen.ts), leer = erbt
+  verantwortlich?: string; // Slug aus `verantwortlich`
 }
 
 export type MeetingPhase =
