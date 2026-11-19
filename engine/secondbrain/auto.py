@@ -412,6 +412,13 @@ def step_stand(ctx: dict) -> dict:
             detail += ", Lagebild neu"
     except Exception as e:                           # noqa: BLE001 - das Bild haelt den Schritt nicht auf
         detail += f", Lagebild nicht geschrieben ({type(e).__name__}: {e})"
+    # Und was ein Agent zuerst liest: Karte (CLAUDE.md) und Themen-Verzeichnis (reports/themen.md)
+    try:
+        import einstieg
+        if einstieg.run(dry_run=ctx["dry_run"])["geaendert"]:
+            detail += ", Themen-Verzeichnis neu"
+    except Exception as e:                           # noqa: BLE001
+        detail += f", Themen-Verzeichnis nicht geschrieben ({type(e).__name__}: {e})"
     return {"ok": True, "changed": sum(1 for r in reports if r["changed"]), "detail": detail}
 
 

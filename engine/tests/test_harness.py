@@ -1172,6 +1172,48 @@ def t_pruefung_parkt_verstummtes():
         eq(pruefung.verstummte(heute), [], "ein zweiter Lauf findet nichts mehr:")
 
 
+def t_einstieg_karte_und_verzeichnis():
+    """Karte und Themen-Verzeichnis fuer Agenten: Unterthemen unter ihrem Dach, Altbestand zaehlt nicht,
+    ein zweiter Lauf (auch an einem anderen Tag) schreibt nichts, eigene Hinweise in der Karte bleiben."""
+    import aufgaben
+    import einstieg
+    import vault_paths
+    from datetime import date as _date
+    d = _VAULT / "entities" / "projects"
+    d.mkdir(parents=True, exist_ok=True)
+    seite = lambda slug, kopf: (d / f"{slug}.md").write_text(   # noqa: E731
+        f"---\ntype: project\ntitle: {slug}\n{kopf}---\n# {slug}\n\n## Offene Punkte\n\n## Event Log\n", encoding="utf-8", newline="\n")
+    seite("karte-dach", "health: red\nampel_grund: zwei Risiken\nmeine_rolle: beteiligt\nfokus: 2\n")
+    seite("karte-kind", "parent: \"[[karte-dach]]\"\nzuletzt_bewegt: '2026-09-28'\nstatus: proposed\n")
+    T = lambda owner, thema, **kw: aufgaben.Task(status=" ", text="x", owner=owner, topics=[thema], **kw)   # noqa: E731
+    punkte = [T("ich", "karte-kind"), T("rita", "karte-kind", due="2026-09-01"), T("rita", "karte-kind", pruefen=True),
+              T("ich", "karte-kind", kind=aufgaben.KIND_QUESTION), aufgaben.Task(status=" ", text="frei")]
+    with _AttrGuard(aufgaben, scan=lambda: punkte), _AttrGuard(vault_paths, ich=lambda: "ich"):
+        zeilen = {r["slug"]: r for r in einstieg.themen_zeilen(_date(2026, 9, 30))}
+        k = zeilen["karte-kind"]
+        eq((k["tiefe"], k["offen"], k["meine"], k["ueberfaellig"], k["fragen"], k["altbestand"], k["rolle"]),
+           (1, 2, 1, 1, 1, 1, "beteiligt"), "Unterthema: Stufe, Zahlen ohne Altbestand, Rolle vom Dach:")
+        text = einstieg.verzeichnis_text(_date(2026, 9, 30))
+        reihe = [z for z in text.splitlines() if "karte-" in z]
+        ok(reihe[0].startswith("| [[karte-dach\\|karte-dach]] ★2 |") and "rot – zwei Risiken" in reihe[0], f"Dach mit Fokus und Ampel:\n{reihe[0]}")
+        ok(reihe[1].startswith("| · [[karte-kind\\|karte-kind]] (proposed) |") and "| 2 | 1 | 1 | 1 | 28.09.2026 |" in reihe[1],
+           f"Unterthema eingerueckt:\n{reihe[1]}")
+        ok("_1 offene Punkte gehören zu keinem Thema" in text, "Punkte ohne Thema werden genannt")
+        ok(einstieg.run(heute=_date(2026, 9, 30))["geaendert"], "erster Lauf schreibt")
+        f = _VAULT / einstieg.KARTE
+        f.write_text(f.read_text(encoding="utf-8") + "\nMein Hinweis an den Agenten.\n", encoding="utf-8", newline="\n")
+        r = einstieg.run(heute=_date(2026, 10, 7))
+        eq((r["karte_geaendert"], r["verzeichnis_geaendert"]), (False, False), "ein anderer Tag allein schreibt nichts:")
+        punkte.append(T("ich", "karte-dach"))
+        (_VAULT / "reports" / "lagebild.md").write_text("# Lagebild\n", encoding="utf-8")
+        r = einstieg.run(heute=_date(2026, 10, 7))
+        eq((r["karte_geaendert"], r["verzeichnis_geaendert"]), (True, True), "neuer Punkt, neuer Bericht -> beide neu:")
+    karte = f.read_text(encoding="utf-8")
+    ok("Mein Hinweis an den Agenten." in karte and karte.count(einstieg.START) == 1, "eigene Hinweise bleiben, ein Block")
+    ok("`reports/lagebild.md`" in karte and "`reports/orgchart.md`" not in karte, "die Karte nennt nur, was es gibt")
+    ok("_Stand 07.10.2026" in (_VAULT / einstieg.VERZEICHNIS).read_text(encoding="utf-8"), "Datum des Schreibens")
+
+
 def t_pruefung_schliesst_nur_mit_beleg():
     """Das Modell nennt, was laut Log erledigt oder ueberholt ist - geschlossen wird nur, wenn der Eintrag
     nicht aelter ist als der Punkt und der Beleg woertlich darin steht."""
@@ -1273,6 +1315,7 @@ TESTS = [
     ("rollen: vererben, ausblenden, Vorschlag aus den Punkten, eintragen", t_rollen_vererben_und_blenden_aus),
     ("pruefung: verstummt in den naechsten Terminen der Reihe -> geparkt", t_pruefung_parkt_verstummtes),
     ("pruefung: erledigt/ueberholt nur mit woertlichem Beleg aus einem juengeren Eintrag", t_pruefung_schliesst_nur_mit_beleg),
+    ("einstieg: Karte (CLAUDE.md) und Themen-Verzeichnis, schreibt nur bei Aenderung", t_einstieg_karte_und_verzeichnis),
     ("vorbereiten: Jourfix nach Richtung - laengst offen, ich schulde, zum Uebergeben", t_jourfix_nach_richtung),
     ("stand: Delta-Zeilen, Risiken in Gruppen, Beteiligte eingeklappt", t_stand_delta_und_risiko_gruppen),
     ("briefing: keine Schablonenfrage, Begruendung ohne Wiederholung, hoechstens sechs", t_briefing_ohne_schablone),

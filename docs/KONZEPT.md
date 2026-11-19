@@ -684,6 +684,7 @@ Befehle deutsch; das Plugin folgt bei den Dateinamen, im Code selbst stehen engl
 | Fokus, Nordstern, Fokus-Spiegel | Felder `fokus`, `ziel`, `target_date`; `reports/fokus-spiegel.md` | `fokus` | `fokus.py` | `core/fokus.ts`, `views/fokus.ts` |
 | Rolle je Thema | Feld `meine_rolle` | `rollen` | `rollen.py` | `core/rollen.ts`, `views/rollen.ts` |
 | Offene Punkte prüfen (verstummt, erledigt laut Log) | `reports/geprueft.md`, `.2ndbrain/daten/pruefung_state.json` | `pruefen` | `pruefung.py` | – |
+| Einstieg für Agenten (Karte, Themen-Verzeichnis) | `CLAUDE.md`, `reports/themen.md` | `einstieg` (in der Automatik mit `stand`) | `einstieg.py` | – |
 | Befehlszeile | – | `help` | `befehle.py` | `desktop/engine.ts` |
 
 ## 24. Wenig vorlegen: Stand als Delta, Briefing ohne Schablone, Lagebild
@@ -748,6 +749,28 @@ keine – was zu viel ist, steht anders formuliert im Log oder gehört jemand an
 - **Gröber schneiden.** Die Nachbereitung nennt das Ergebnis, das am Ende vorliegen soll, nicht jeden Handgriff
   dorthin; mehrere Aufgaben derselben Person zum selben Gegenstand sind eine (`AUFGABEN_REGEL`).
 - **Bewusst nicht gebaut:** andere Quellen als führend (Ticket-System, Planner) – zurückgestellt am 19.11.2026.
+
+### Einstieg für Agenten: Karte und Themen-Verzeichnis
+
+Wer den Vault-Ordner einem Agenten gibt (Claude Code, Cowork), bezahlt nach gelesenem Text. Gemessen am
+19.11.2026: rund die Hälfte des Vaults sind archivierte Termine, die Themen-Seiten – die eigentliche
+Antwortschicht – etwa ein Zehntel. Ohne Wegweiser liest ein Agent das Teure. `einstieg.py` schreibt deshalb
+zwei Dateien, beide ohne Modell und in der Automatik mit dem Schritt `stand`:
+
+- **`CLAUDE.md` im Vault-Stamm, die Karte.** Sie steht in jedem Gespräch im Kontext und ist deshalb knapp
+  (unter tausend Tokens): Vorgehen (Verzeichnis → Themen-Seite → suchen → Quelle), Suchmuster für Punkte, Log
+  und Themen-Frontmatter – sie treffen die Zeilen selbst, sind also immer aktuell, und zeigen das Format gleich
+  mit –, die Fallen der Suche (Checklisten, Altbestand, geerbte Rolle) und die Regeln (nur aus dem Vault mit
+  Quelle, Erzeugtes nicht ändern, nichts löschen, der Kalender-Schlüssel bleibt zu). Keine Ordner-Tabelle,
+  keine Formatbeschreibung: was sich aus Namen, Muster oder einem Blick in die Seite ergibt, fehlt. Der Text ist fest: er hängt nur an „ich“ und daran, welche Ordner und Berichte
+  es gibt – kein Datum, keine Zahlen. Er steht zwischen zwei Marken; eigene Hinweise außerhalb bleiben.
+- **`reports/themen.md`, das Verzeichnis.** Eine Zeile je Thema, Unterthemen eingerückt unter ihrem Dach: Art,
+  Rolle, Ampel mit Grund, offen (ohne ungeprüften Altbestand), meine, überfällig, Fragen, zuletzt bewegt,
+  nächster Termin, Fokus-Rang. Geschrieben wird nur, wenn sich mehr als das Datum geändert hat.
+
+Grundsatz dahinter (Entscheidung 19.11.2026): die Engine führt Buch – Punkte mit Person, Datum und Quelle, Log,
+Rollen, Organisation – und rechnet, was ohne Modell geht. Urteil und Synthese auf Nachfrage kann ein großes
+Modell aus dieser Buchhaltung selbst leisten; eine neue Ableitung mit dem lokalen Modell muss sich daran messen.
 
 ## 23. Triage: was mache ich mit meinen offenen Punkten?
 

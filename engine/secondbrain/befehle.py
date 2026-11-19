@@ -92,6 +92,8 @@ GRUPPEN = [
         ("aufgaben", "aufgaben", [], "offene Punkte (--open --owner <slug> --topic <slug> --json | --summary)"),
         ("lagebild", "lagebild", [], "reports/lagebild.md: Zusagen je Person mit Alter, Themen-Radar, Ablaeufe mit Stand\n"
                                       "(--dry-run | --json)"),
+        ("einstieg", "einstieg", [], "fuer Agenten (Claude, Cowork): CLAUDE.md als Karte des Vaults und\n"
+                                      "reports/themen.md, eine Zeile je Thema (--dry-run | --json)"),
         ("triage", "triage", [], "meine offenen Punkte einordnen: selbst, uebergeben, nachfassen, Atlas, parken\n"
                                   "(--alle | --json | --ohne-modell | --anwenden PFAD --line N --text T --als ... [--an SLUG])"),
         ("risiken", "ampel", [], "Risiken aus dem Themen-Log (JSON)"),

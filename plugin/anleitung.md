@@ -349,6 +349,23 @@ aus deinem Vault, mit Links zu den Quellen.
   Gespräch bleibt dabei erhalten.
 - Die Rezepte liegen in `.2ndbrain/chat-skills/` und lassen sich anpassen.
 
+## Mit Claude im Vault-Ordner arbeiten
+
+Wer den Vault-Ordner Claude gibt (Claude Code, Cowork), findet dort zwei Dateien, die die Automatik pflegt:
+
+- **`CLAUDE.md`** im Stamm des Vaults – die Karte: was zuerst zu lesen ist, was wo liegt, wie ein offener
+  Punkt und ein Log-Eintrag aussehen, was nicht angefasst wird. Der Text ändert sich nur, wenn sich der
+  Aufbau ändert. Unter „Eigene Hinweise“ (außerhalb der beiden Marken) kannst du dazuschreiben, was Claude
+  über dich wissen soll – das bleibt stehen.
+- **`reports/themen.md`** – das Themen-Verzeichnis: eine Zeile je Thema mit Rolle, Ampel, offenen Punkten,
+  deinen Punkten, letzter Bewegung und nächstem Termin.
+
+So liest Claude für eine Frage das Verzeichnis und eine Themen-Seite statt des Archivs – das ist ein
+Bruchteil des Textes. Lädt dein Werkzeug `CLAUDE.md` nicht von selbst, beginne mit „Lies zuerst CLAUDE.md“.
+Von Hand neu schreiben: `2ndbrain einstieg`.
+
+Bedenke: Was Claude liest, verlässt deinen Rechner – anders als beim lokalen Modell des Chats.
+
 ## Am Handy
 
 Lesen, abhaken, nacherfassen und den Vault fragen geht überall. Nachbereiten, Einsortieren und die
