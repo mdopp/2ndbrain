@@ -86,7 +86,13 @@ GRUPPEN = [
         ("firma-neu", "anlegen", ["companies"], "\"<Name>\": Firma anlegen"),
         ("reihe-neu", "reihen", ["--neu"], "\"<Name>\" [--kind weekly] [--keywords a,b]: Reihe anlegen"),
         ("umbenennen", "umbenennen", [], "<alt> <neu>: vault-weit umbenennen (--dry-run)"),
-        ("rueckfragen", "rueckfragen", [], "offene Rueckfragen (list | add | resolve)"),
+        ("rueckfragen", "rueckfragen", [], "offene Rueckfragen (list | add | resolve | abhaken [--json --mit-modell])"),
+        ("punkt", "aendern", [], "einen offenen Punkt aendern, mit Hinweis an der Quelle\n"
+                                 "(--pfad P --line N --text T --als erledigt|verworfen|hinweis [--hinweis H] [--log])"),
+        ("thema-schliessen", "thema_schliessen", [], "<slug>: Vorschau als JSON | --anwenden (JSON von stdin: grund, punkte,\n"
+                                                      "sonst, unterthemen) | --oeffnen"),
+        ("durchsprechen", "durchsprechen", [], "offene Punkte im Fliesstext durchgehen, JSON von stdin:\n"
+                                                "--punkte | --vorschlag (Modell) | --anwenden"),
     ]),
     ("Lesen - das Plugin rechnet selbst; diese Fassungen dienen dem Terminal", [
         ("aufgaben", "aufgaben", [], "offene Punkte (--open --owner <slug> --topic <slug> --json | --summary)"),

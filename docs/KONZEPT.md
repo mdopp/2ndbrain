@@ -684,6 +684,10 @@ Befehle deutsch; das Plugin folgt bei den Dateinamen, im Code selbst stehen engl
 | Fokus, Nordstern, Fokus-Spiegel | Felder `fokus`, `ziel`, `target_date`; `reports/fokus-spiegel.md` | `fokus` | `fokus.py` | `core/fokus.ts`, `views/fokus.ts` |
 | Rolle je Thema | Feld `meine_rolle` | `rollen` | `rollen.py` | `core/rollen.ts`, `views/rollen.ts` |
 | Offene Punkte prüfen (verstummt, erledigt laut Log) | `reports/geprueft.md`, `.2ndbrain/daten/pruefung_state.json` | `pruefen` | `pruefung.py` | – |
+| Punkt ändern mit Hinweis, Log-Zeile | Unterpunkt an der Quelle, `reports/geprueft.md` | `punkt` | `aendern.py` | `core/aufgaben.ts`, `views/punkt.ts` |
+| Thema abschließen, wieder öffnen | Felder `status: done`, `abgeschlossen`, `abschluss_grund` | `thema-schliessen` | `thema_schliessen.py` | `views/themaSchliessen.ts` |
+| Rückfragen mit Hinweis | `04_Clarifications.md` (`> Hinweis:`) | `rueckfragen abhaken` | `rueckfragen.py` | `core/rueckfragen.ts`, `views/rueckfragen.ts` |
+| Durchsprechen | – | `durchsprechen` | `durchsprechen.py` | `views/durchsprechen.ts` |
 | Einstieg für Agenten (Karte, Themen-Verzeichnis) | `CLAUDE.md`, `reports/themen.md` | `einstieg` (in der Automatik mit `stand`) | `einstieg.py` | – |
 | Befehlszeile | – | `help` | `befehle.py` | `desktop/engine.ts` |
 
@@ -771,6 +775,48 @@ zwei Dateien, beide ohne Modell und in der Automatik mit dem Schritt `stand`:
 Grundsatz dahinter (Entscheidung 19.11.2026): die Engine führt Buch – Punkte mit Person, Datum und Quelle, Log,
 Rollen, Organisation – und rechnet, was ohne Modell geht. Urteil und Synthese auf Nachfrage kann ein großes
 Modell aus dieser Buchhaltung selbst leisten; eine neue Ableitung mit dem lokalen Modell muss sich daran messen.
+
+## 26. Von Hand abschließen: Hinweis, Thema, Rückfragen, Durchsprechen
+
+Bis 0.13.6 konnte man nur auswählen: ein Haken an einer Aufgabe, ein Haken an einer Option. Warum etwas
+erledigt ist, was beim Einarbeiten zu beachten wäre, dass ein ganzes Vorhaben vorbei ist – dafür gab es keinen
+Ort. Seit 0.14.0 (Entscheidung 20.11.2026) gilt: jede Entscheidung von Hand darf einen eigenen Satz tragen, und
+der steht an der Quelle.
+
+- **Ein Schreib-Baustein** (`aendern.py`): erledigt, verworfen, übergeben, Frist, Hinweis, umhängen – jede
+  Änderung mit Unterpunkt an der Quelle („Erledigt am … (durchgesprochen): …“), nur wenn an der Zeile noch der
+  erwartete offene Punkt steht, je Datei von unten nach oben. Status und Hinweis lassen die Zeile, wie sie
+  notiert wurde; Person, Frist und Thema schreiben sie kanonisch neu. Dazu `log_eintrag` (eine Zeile oben ins
+  Event Log) und `punkt_neu`. Was von Hand geräumt wurde, steht mit im Bericht `reports/geprueft.md`.
+- **Hinweis am Punkt** (Plugin, auch am Handy): das ✎ an einer Aufgabe in „Heute“ und in der Aufgabenliste –
+  erledigt, verworfen oder nur ein Hinweis, auf Wunsch zusätzlich als `[STATUS]` im Log des Themas
+  (`completeInText`, `logEintragInText`; dieselbe Form wie `aendern.py`). Die Triage nimmt je Entscheidung
+  einen Hinweis mit (`--hinweis`).
+- **Thema abschließen** (`thema_schliessen.py`): Grund (Pflicht), je offenem Punkt des Themas – auf seiner Seite
+  und in Termin-Notizen – erledigt, verworfen oder ans Dach-Thema umhängen (ein Punkt auf der Themen-Seite
+  zieht mit seinen Unterpunkten um). Vorbelegt: Fragen und ungeprüfter Altbestand fallen weg, das Übrige ist
+  erledigt. Das Thema bekommt `status: done`, `abgeschlossen`, `abschluss_grund`; Fokus-Rang und nächster
+  Schritt entfallen; im Log steht `[MILESTONE] Thema abgeschlossen: …`. Unterthemen werden angeboten und nur
+  mit abgeschlossen, wenn man sie nennt (ihre Punkte werden verworfen). Die Seite bleibt (nichts wird gelöscht);
+  das Thema fällt aus Heute, Radar-Ansicht des Plugins, Fokus, Rollen, Lagebild und Themen-Verzeichnis (dort in
+  der Fußzeile). Wieder öffnen setzt den Status zurück, die Punkte bleiben geschlossen.
+- **Rückfragen mit Hinweis** (`rueckfragen.py`, Plugin-Fenster „Rückfragen“): je Karte die Optionen zum
+  Anklicken und ein Feld für einen Hinweis (`> Hinweis: …` in der Karte). Der Hinweis bleibt an der erledigten
+  Karte und, wo die Antwort Aufgaben zuordnet, als Unterpunkt an ihnen. Ohne Haken ist er selbst die Antwort:
+  ein Name gilt wie eine frei eingetragene Option, sonst nennt das Modell die Nummer der gemeinten Option –
+  nennt es keine (oder fehlt es), bleibt die Karte offen und der Hinweis stehen. „Ohne Aktion schließen“
+  schließt jede Karte. Am Desktop arbeitet das Plugin die Antwort sofort ein (`rueckfragen abhaken --json`).
+- **Durchsprechen** (`durchsprechen.py`, Plugin-Fenster): ein Ausschnitt (Thema, Person, meine Punkte),
+  höchstens 60 Punkte nummeriert, dazu Fließtext („A ist durch, B macht jetzt Rita bis Freitag, C vergessen
+  wir, entschieden wurde X“). Das Modell ordnet zu, der Code prüft: Nummer aus der Liste; Beleg wörtlich im
+  eigenen Text (mindestens zwei Wörter); eine neue Person muss im Text stehen und wird nur bei eindeutigem
+  Namen oder Alias zum Verweis; die Frist rechnet der Code aus dem Beleg (`zeitangaben.py`, „3.12.“); Log-
+  Einträge und neue Punkte nur für Themen, die es gibt. Die Vorschläge stehen mit Beleg zur Auswahl, geschrieben
+  wird erst mit „Übernehmen“, danach steht die Liste neu da. Der Chat selbst bleibt lesend – das Durchsprechen
+  ist ein eigenes Fenster mit eigener Prüfung, nicht ein Werkzeug des Chats.
+
+Nicht gebaut: Durchsprechen am Handy (die Engine rechnet am Desktop) und ein Filter in der Radar-Notiz
+(`00_Themen-Radar.base`) für abgeschlossene Themen.
 
 ## 23. Triage: was mache ich mit meinen offenen Punkten?
 

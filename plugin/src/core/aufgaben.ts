@@ -237,7 +237,8 @@ const SOURCE_TAIL_RE = new RegExp(`(${S}*\\(→ \\[\\[[^\\]]*\\]\\]\\))?${S}*$`,
 
 /** Punkt abhaken ([x] und ✅ heute) - nur, wenn die Zeile noch der erwartete Punkt ist
  *  (`expected`: Punkt-Text, verglichen ueber `key`). `text` im Ergebnis: neuer Dateiinhalt. */
-export function completeInText(content: string, line: number, expected: string | null, today: string): CompleteResult {
+export function completeInText(content: string, line: number, expected: string | null, today: string,
+                               opts: PunktAenderung = {}): CompleteResult {
   const lines = universalNewlines(content).split("\n");
   if (!(line >= 0 && line < lines.length)) return { ok: false, grund: "Zeile nicht gefunden – bitte neu laden." };
   const t = parseLine(lines[line]);
@@ -245,10 +246,52 @@ export function completeInText(content: string, line: number, expected: string |
     return { ok: false, grund: "Die Stelle hat sich geändert – bitte neu laden." };
   }
   if (!isOpen(t)) return { ok: true, aktion: "schon erledigt" };
-  let next = lines[line].replace(CHECKBOX_STATUS_RE, "$1x$2");
-  if (!t.done) next = next.replace(SOURCE_TAIL_RE, (_m, src?: string) => ` ${DONE} ${today}${src ?? ""}`);
+  const als = opts.als ?? "erledigt";
+  const hinweis = (opts.hinweis ?? "").split(/\s+/u).filter(Boolean).join(" ");
+  if (als === "hinweis" && !hinweis) return { ok: false, grund: "Es fehlt der Hinweis." };
+  let next = lines[line];
+  if (als === "erledigt") {
+    next = next.replace(CHECKBOX_STATUS_RE, "$1x$2");
+    if (!t.done) next = next.replace(SOURCE_TAIL_RE, (_m, src?: string) => ` ${DONE} ${today}${src ?? ""}`);
+  } else if (als === "verworfen") {
+    next = next.replace(CHECKBOX_STATUS_RE, "$1-$2");
+  }
   lines[line] = next;
-  return { ok: true, aktion: "erledigt", text: lines.join("\n") };
+  if (hinweis || als === "verworfen") {
+    // wie aendern.py: der eigene Satz steht als Unterpunkt an der Quelle
+    const einzug = /^[ \t]*/u.exec(next)?.[0] ?? "";
+    const tag = `${today.slice(8, 10)}.${today.slice(5, 7)}.${today.slice(0, 4)}`;
+    lines.splice(line + 1, 0, `${einzug}${NOTE_PREFIX}${PUNKT_WORT[als]} am ${tag}${hinweis ? `: ${hinweis}` : ""}`);
+  }
+  return { ok: true, aktion: als, text: lines.join("\n") };
+}
+
+/** Was mit einem offenen Punkt geschieht: abhaken, verwerfen (`[-]`) oder nur ein Hinweis - je mit eigenem Satz. */
+export interface PunktAenderung { als?: "erledigt" | "verworfen" | "hinweis"; hinweis?: string }
+export const NOTE_PREFIX = "    - ";
+const PUNKT_WORT = { erledigt: "Erledigt", verworfen: "Verworfen", hinweis: "Hinweis" } as const;
+
+/** Eine Zeile oben ins Event Log (wie aendern.log_eintrag): `- [JJJJ-MM-TT] [ART] Text`. Fehlt der Abschnitt,
+ *  entsteht er am Ende; steht die Zeile schon da, bleibt der Text, wie er ist. */
+export function logEintragInText(content: string, art: "STATUS" | "DECISION" | "RISK" | "MILESTONE", text: string,
+                                 today: string): string {
+  const satz = text.split(/\s+/u).filter(Boolean).join(" ");
+  if (!satz) return content;
+  const zeile = `- [${today}] [${art}] ${satz}`;
+  const lines = universalNewlines(content).split("\n");
+  if (lines.some((l) => strip(l) === zeile)) return content;
+  const idx = lines.findIndex((l) => strip(l) === EVENT_LOG_SECTION);
+  if (idx < 0) {
+    while (lines.length && !strip(lines[lines.length - 1])) lines.pop();
+    lines.push("", EVENT_LOG_SECTION, zeile, "");
+    return lines.join("\n");
+  }
+  let ende = lines.findIndex((l, i) => i > idx && l.startsWith("## "));
+  if (ende < 0) ende = lines.length;
+  let at = lines.findIndex((l, i) => i > idx && i < ende && l.trimStart().startsWith("- ["));
+  if (at < 0) at = idx + 1 < lines.length && strip(lines[idx + 1]) && !lines[idx + 1].startsWith("## ") ? ende : idx + 1;
+  lines.splice(at, 0, zeile);
+  return lines.join("\n");
 }
 
 const wikilink = (slug: string, name: string): string => (name && name !== slug ? `[[${slug}|${name}]]` : `[[${slug}]]`);

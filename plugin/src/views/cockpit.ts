@@ -147,6 +147,9 @@ export class CockpitBlock extends MarkdownRenderChild {
                                     attr: { title: "Zur Fundstelle" } });
         a.onclick = (e) => { e.preventDefault(); void this.plugin.openAt(t.path!, t.line); };
       }
+      const stift = li.createEl("button", { cls: "sb-stift clickable-icon", text: "✎",
+                                            attr: { "aria-label": "Mit Hinweis abschließen, verwerfen oder kommentieren" } });
+      stift.onclick = (e) => { e.stopPropagation(); this.plugin.openPunkt(t); };
     }
   }
 

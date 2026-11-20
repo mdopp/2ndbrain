@@ -13,7 +13,14 @@ import { HttpPost, complete, completeTools, stripThink } from "./core/modell";
 import type { MeetingInfo, RiskRow, TaskInfo } from "./core/ansicht";
 import { RISK_WINDOW_DAYS, riskRows } from "./core/risiken";
 import { SKILL_DIR, SkillRecipe, parseSkills } from "./core/rezepte";
-import { CompleteResult, TOPIC_SECTION, appendToSection, completable, completeInText, isOpen, scanTasks } from "./core/aufgaben";
+import {
+  CompleteResult, PunktAenderung, TOPIC_SECTION, appendToSection, completable, completeInText, isOpen, logEintragInText, scanTasks,
+} from "./core/aufgaben";
+import { Antwort, RUECKFRAGEN_NOTE, Rueckfrage, beantworten, rueckfragen } from "./core/rueckfragen";
+import { PunktModal } from "./views/punkt";
+import { RueckfragenModal } from "./views/rueckfragen";
+import { ThemaErgebnis, ThemaSchliessenModal, ThemaVorschau } from "./views/themaSchliessen";
+import { Bereich, DurchsprechenModal } from "./views/durchsprechen";
 import { VaultIndex } from "./core/vaultIndex";
 import { withoutAssigned } from "./core/themen";
 import type { DesktopServices, Likec4Paths, PythonInfo } from "./desktop";
@@ -357,9 +364,9 @@ export default class SecondBrainPlugin extends Plugin {
   }
 
   /** Eine Entscheidung der Triage an der Quelle des Punkts festhalten, danach die Ansichten neu zeichnen. */
-  async triageAnwenden(p: TriagePunkt, als: Vorschlag): Promise<{ ok: boolean; grund?: string } | null> {
+  async triageAnwenden(p: TriagePunkt, als: Vorschlag, hinweis = ""): Promise<{ ok: boolean; grund?: string } | null> {
     if (!this.desktop) return null;
-    const r = await this.engine.json<{ ok: boolean; grund?: string }>(anwendenArgs(p, als), { timeoutMs: 60_000 });
+    const r = await this.engine.json<{ ok: boolean; grund?: string }>(anwendenArgs(p, als, hinweis), { timeoutMs: 60_000 });
     await this.refreshViews();
     return r;
   }
@@ -477,6 +484,12 @@ export default class SecondBrainPlugin extends Plugin {
                       callback: () => new TriageModal(this.app, this).open() });
     this.addCommand({ id: "rollen", name: "Meine Rolle je Thema (führe, beteiligt, beobachte)",
                       callback: () => new RollenModal(this.app, this).open() });
+    this.addCommand({ id: "rueckfragen", name: "Rückfragen beantworten (mit Hinweis)",
+                      callback: () => new RueckfragenModal(this.app, this).open() });
+    this.addCommand({ id: "durchsprechen", name: "Offene Punkte durchsprechen (Fließtext → Vorschläge)",
+                      callback: () => this.openDurchsprechen() });
+    this.addCommand({ id: "thema-schliessen", name: "Thema abschließen oder wieder öffnen",
+                      callback: () => this.openThemaSchliessen() });
     this.addCommand({ id: "neuaufbau", name: "Alles neu aufbauen (in einer Kopie neben dem Vault)",
                       callback: () => new NeuaufbauModal(this.app, this).open() });
     this.addCommand({ id: "open-system-overview", name: "Systemübersicht öffnen (LikeC4)",
@@ -1325,26 +1338,135 @@ export default class SecondBrainPlugin extends Plugin {
 
   /** Punkt abhaken - nur, wenn die Zeile noch dieser Punkt ist. */
   async completeTask(t: TaskInfo): Promise<CaptureResult> {
+    return this.punktAendern(t, {});
+  }
+
+  /** Einen offenen Punkt abhaken, verwerfen oder mit einem Hinweis versehen (core/aufgaben.ts) - der eigene
+   *  Satz steht als Unterpunkt an der Quelle, mit `log` auch als [STATUS] im Log des ersten Themas. */
+  async punktAendern(t: TaskInfo, wie: PunktAenderung & { log?: boolean }): Promise<CaptureResult> {
     if (!t.path || t.line === null) return { ok: false, grund: "Ohne Fundstelle" };
-    const r = await this.completeInPlugin(t.path, t.line, t.text);
+    const r = await this.completeInPlugin(t.path, t.line, t.text, wie);
+    const hinweis = (wie.hinweis ?? "").trim();
+    const thema = t.topics[0] ? this.index.topic(t.topics[0]) : null;
+    if (r.ok && wie.log && hinweis && thema) {
+      const file = this.app.vault.getAbstractFileByPath(thema.path);
+      const wort = { erledigt: "Erledigt", verworfen: "Verworfen", hinweis: "Hinweis" }[wie.als ?? "erledigt"];
+      if (file instanceof TFile) {
+        await this.schreiben(file, (current) => logEintragInText(current, "STATUS", `${wort}: ${t.text} – ${hinweis}`, localIsoDate()));
+      }
+    }
     await this.refreshTasks();
     return r;
   }
 
+  openRueckfragen(): void {
+    new RueckfragenModal(this.app, this).open();
+  }
+
+  /** `PunktModal` zu einem offenen Punkt: Hinweis, erledigt, verworfen. */
+  openPunkt(t: TaskInfo): void {
+    new PunktModal(this.app, this, t).open();
+  }
+
   /** [x] und ✅ heute (wie `2ndbrain aufgaben --done`) - auch waehrend die Engine laeuft (schreiben()). */
-  private async completeInPlugin(path: string, line: number, text: string): Promise<CompleteResult> {
+  private async completeInPlugin(path: string, line: number, text: string, wie: PunktAenderung = {}): Promise<CompleteResult> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!completable(path) || !(file instanceof TFile)) return { ok: false, grund: "Kein Punkt in einer Termin- oder Themen-Datei." };
     const today = localIsoDate();
-    const check = completeInText(await this.app.vault.read(file), line, text, today);
+    const check = completeInText(await this.app.vault.read(file), line, text, today, wie);
     if (!check.ok || check.text === undefined) return { ok: check.ok, grund: check.grund, aktion: check.aktion };
     let result: CompleteResult = check;
     const weg = await this.schreiben(file, (current) => {
-      result = completeInText(current, line, text, today);
+      result = completeInText(current, line, text, today, wie);
       return result.ok && result.text !== undefined ? result.text : current;
     });
     if (weg === "warten") return { ok: false, grund: "Dieser Termin wird gerade nachbereitet – gleich noch einmal." };
     return { ok: result.ok, grund: result.grund, aktion: result.aktion };
+  }
+
+  // ----------------------------------------------------------- Rueckfragen
+
+  /** Die offenen Rueckfragen aus `04_Clarifications.md` (core/rueckfragen.ts) - auch am Handy. */
+  async rueckfragenLesen(): Promise<Rueckfrage[]> {
+    const file = this.app.vault.getAbstractFileByPath(RUECKFRAGEN_NOTE);
+    return file instanceof TFile ? rueckfragen(await this.app.vault.read(file)) : [];
+  }
+
+  /** Eine Rueckfrage beantworten: Haken und Hinweis in die Karte. Am Desktop arbeitet die Engine sie gleich
+   *  ein (`rueckfragen abhaken`), am Handy beim naechsten Lauf der Automatik am Desktop. */
+  async rueckfrageBeantworten(id: string, a: Antwort): Promise<{ ok: boolean; grund?: string; ergebnis?: string; wartet?: boolean }> {
+    const file = this.app.vault.getAbstractFileByPath(RUECKFRAGEN_NOTE);
+    if (!(file instanceof TFile)) return { ok: false, grund: `${RUECKFRAGEN_NOTE} fehlt.` };
+    let geschrieben = false;
+    await this.schreiben(file, (current) => {
+      const neu = beantworten(current, id, a);
+      geschrieben = neu !== null;
+      return neu ?? current;
+    });
+    if (!geschrieben) return { ok: false, grund: "Die Karte gibt es nicht mehr, oder die Antwort ist leer." };
+    if (!this.desktop) return { ok: true, wartet: true };
+    const r = await this.engine.json<{ ok: boolean; karten: { id: string; ok: boolean; ergebnis?: string; grund?: string }[] }>(
+      ["rueckfragen", "abhaken", "--json", ...(a.option === null && !a.ohneAktion ? ["--mit-modell"] : [])], { timeoutMs: 5 * 60_000 });
+    await this.refreshTasks();
+    const k = r?.karten.find((x) => x.id === id);
+    if (!k) return { ok: true, wartet: true };
+    return k.ok ? { ok: true, ergebnis: k.ergebnis } : { ok: false, grund: k.grund };
+  }
+
+  // ------------------------------------------------------ Thema abschliessen
+
+  async themaVorschau(slug: string): Promise<ThemaVorschau | null> {
+    if (!this.desktop) return null;
+    return this.engine.json<ThemaVorschau>(["thema-schliessen", slug], { timeoutMs: 60_000 });
+  }
+
+  async themaSchliessen(slug: string, daten: { grund: string; punkte: Record<string, string>; sonst: string; unterthemen: string[] }):
+      Promise<ThemaErgebnis | null> {
+    if (!this.desktop) return null;
+    const r = await this.engine.json<ThemaErgebnis>(["thema-schliessen", slug, "--anwenden"],
+                                                    { input: JSON.stringify(daten), timeoutMs: 2 * 60_000 });
+    await this.refreshTasks();
+    return r;
+  }
+
+  async themaOeffnen(slug: string): Promise<{ ok: boolean; grund?: string } | null> {
+    if (!this.desktop) return null;
+    const r = await this.engine.json<{ ok: boolean; grund?: string }>(["thema-schliessen", slug, "--oeffnen"], { timeoutMs: 60_000 });
+    await this.refreshTasks();
+    return r;
+  }
+
+  /** Thema abschliessen: das Thema der offenen Notiz, sonst eine Auswahl. */
+  openThemaSchliessen(slug?: string): void {
+    if (!this.desktop) {
+      new Notice(`2ndBrain: Thema abschließen – ${NUR_DESKTOP}`);
+      return;
+    }
+    const aktiv = this.app.workspace.getActiveFile()?.path ?? "";
+    const offen = /^entities\/projects\/([^/]+)\.md$/u.exec(aktiv)?.[1];
+    new ThemaSchliessenModal(this.app, this, slug ?? offen ?? "").open();
+  }
+
+  // ----------------------------------------------------------- Durchsprechen
+
+  async durchsprechen<T>(schritt: "punkte" | "vorschlag" | "anwenden", daten: object): Promise<T | null> {
+    if (!this.desktop) return null;
+    const r = await this.engine.json<T>(["durchsprechen", `--${schritt}`],
+                                        { input: JSON.stringify(daten), timeoutMs: schritt === "vorschlag" ? 10 * 60_000 : 2 * 60_000 });
+    if (schritt === "anwenden") await this.refreshTasks();
+    return r;
+  }
+
+  /** Durchsprechen: das Thema der offenen Notiz ist vorbelegt, sonst „meine Punkte“. */
+  openDurchsprechen(bereich?: Bereich): void {
+    if (!this.desktop) {
+      new Notice(`2ndBrain: Durchsprechen – ${NUR_DESKTOP}`);
+      return;
+    }
+    const aktiv = this.app.workspace.getActiveFile()?.path ?? "";
+    const thema = /^entities\/projects\/([^/]+)\.md$/u.exec(aktiv)?.[1];
+    const person = /^entities\/people\/([^/]+)\.md$/u.exec(aktiv)?.[1];
+    new DurchsprechenModal(this.app, this, bereich ?? (thema ? { thema } : person ? { person } : { meine: true })).open();
   }
 
   /** Sperre wie `auto.acquire_lock`: frei, wenn keine Datei da oder sie aelter als 30 min ist.

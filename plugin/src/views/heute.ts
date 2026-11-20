@@ -263,6 +263,8 @@ export class TodayView extends ItemView {
     sum.createSpan({ cls: `sb-summary-meta${overdue ? " sb-alert" : ""}`,
                      text: `${list.length}${overdue ? ` · ${overdue} überfällig` : ""}` });
     this.headButton(sum, "Alle", () => void this.app.workspace.openLinkText(TASKS_NOTE, "", false));
+    if (this.plugin.desktop) this.headButton(sum, "Durchsprechen", () => this.plugin.openDurchsprechen({ meine: true }));
+    this.headButton(sum, "Rückfragen", () => this.plugin.openRueckfragen());
     if (!list.length) {
       body.createDiv({ cls: "sb-muted", text: "Nichts offen." });
       return;
@@ -300,6 +302,10 @@ export class TodayView extends ItemView {
     if (t.due) bits.push(late ? `seit ${daysBetween(t.due, today)} T überfällig` : `fällig ${dayLabel(t.due, today)}`);
     else if (t.created) bits.push(`seit ${daysBetween(t.created, today)} T offen`);
     main.createDiv({ cls: "sb-task-meta", text: bits.join(" · ") });
+    // ✎: mit eigenem Satz abschliessen, verwerfen oder nur einen Hinweis hinterlassen (views/punkt.ts)
+    const stift = row.createEl("button", { cls: "sb-stift clickable-icon", text: "✎",
+                                           attr: { "aria-label": "Mit Hinweis abschließen, verwerfen oder kommentieren" } });
+    stift.onclick = (e) => { e.stopPropagation(); this.plugin.openPunkt(t); };
   }
 
   // -------------------------------------------------------------- Termine

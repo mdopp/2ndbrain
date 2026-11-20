@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import aufgaben as tk
+import thema_schliessen
 import vault_paths as vp
 
 FUEHRE, BETEILIGT, BEOBACHTE = "fuehre", "beteiligt", "beobachte"
@@ -119,7 +120,10 @@ def vorschlaege() -> list[dict]:
             if ich and t.owner == ich:
                 meine[s] = meine.get(s, 0) + 1
     out = []
+    zu = thema_schliessen.abgeschlossene()
     for slug, th in themen.items():
+        if slug in zu:                                   # abgeschlossen: keine Rolle mehr zu vergeben
+            continue
         n, m = alle.get(slug, 0), meine.get(slug, 0)
         if th["fokus"]:
             v, grund = FUEHRE, "Fokus-Thema"

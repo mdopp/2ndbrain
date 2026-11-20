@@ -296,9 +296,8 @@ def _bericht(getan: list[dict], heute: date, alt: dict | None = None) -> None:
     if not getan and not alt_n:
         return
     f = vp.VAULT / BERICHT
-    kopf = ["# Automatisch geprüft", "",
-            "_Was die Automatik an offenen Punkten geschlossen oder geparkt hat – der jüngste Lauf oben. An der "
-            "Quelle steht der Grund als Unterpunkt. Zurücknehmen: das Kästchen dort wieder öffnen (`[ ]`)._", ""]
+    import aendern                         # derselbe Bericht haelt auch fest, was von Hand geraeumt wurde
+    kopf = aendern.BERICHT_KOPF
     alt = []
     if f.is_file():
         text = f.read_text(encoding="utf-8")

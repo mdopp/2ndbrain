@@ -173,8 +173,15 @@ Mit dem Modell einsortiert wird erst nach deiner Freigabe: einmal den Probelauf 
 
 Wo 2ndBrain etwas nicht sicher weiß – welche von zwei Personen gemeint ist, zu welchem Termin ein
 Protokoll gehört, ob ein Begriff nur ein anderes Wort für einen bekannten ist –, rät es nicht, sondern
-fragt: als Karte in `04_Clarifications.md`. **Beantworten:** das Kästchen bei der passenden Antwort
-anhaken. Der nächste Lauf der Automatik arbeitet die Antwort ein; erledigte Karten wandern ins Archiv.
+fragt: als Karte in `04_Clarifications.md`.
+
+**Beantworten:** Befehl „Rückfragen beantworten“ (oder „Rückfragen“ über „Meine Aufgaben“ in „Heute“). Je
+Karte klickst du die passende Option an und schreibst, wenn du magst, einen **Hinweis zum Einarbeiten** dazu –
+er bleibt an der Karte und an den Aufgaben, die die Antwort zuordnet. Passt keine Option, antworte nur mit dem
+Hinweis: ein voller Name gilt als Antwort, sonst sucht das Modell die Option, die du meinst; findet es keine,
+bleibt die Karte offen und dein Hinweis steht. „Ohne Aktion schließen“ räumt eine Karte, die sich erledigt hat.
+Am Desktop wird sofort eingearbeitet, am Handy beim nächsten Lauf der Automatik. Der alte Weg geht weiter: in
+der Notiz das Kästchen anhaken.
 
 ## Namen sauber
 
@@ -234,6 +241,8 @@ Begriff auf, der im Kanon fehlt, schlägt 2ndBrain eine Erweiterung vor – als 
 - [[01_Aufgaben]] – alle offenen Punkte: deine unter „Meine Aufgaben“, die anderer unter
   „Nachfassen“. Bei einem Termin mit der Person stehen sie direkt am Termin.
 - Abhaken geht in „Heute“, in der Aufgabenliste oder in der Notiz selbst.
+- **Mit Hinweis:** das ✎ neben einer Aufgabe – erledigt, verworfen oder nur ein Hinweis, mit deinem Satz dazu.
+  Er steht als Unterpunkt an der Aufgabe, auf Wunsch auch im Log des Themas. Geht auch am Handy.
 - [[05_Risiken]] – Risiken aus den Logs der Themen; aktiv ist, was in den letzten 30 Tagen erwähnt wurde.
 - Aus einem Termin wird nur eine Aufgabe, was jemand zugesagt oder als Auftrag bekommen hat. Was nur
   geschehen „sollte“, steht im Parkplatz der Termin-Notiz („Noch ohne Zusage: …“). Unter einer Aufgabe
@@ -258,6 +267,24 @@ steht danach unter „Nachfassen“; Geparktes verschwindet aus den Listen (in d
 An wen du übergeben kannst, steht in `.2ndbrain/local.config.json` unter `delegation`: `rollen`
 (z. B. „architekt“ – alle mit dieser Rolle), `personen` (einzelne dazu), `gruppen` (leer = alle Teams
 und Reihen). Die eigene Linie kommt aus der Organisation.
+
+## Durchsprechen und abschließen
+
+**Offene Punkte durchsprechen** (Befehl, oder „Durchsprechen“ über „Meine Aufgaben“; Desktop). Du wählst
+einen Ausschnitt – ein Thema, deine Punkte – und siehst die offenen Punkte nummeriert. Darunter schreibst du,
+wie du es erzählen würdest: „Das Lastenheft ist fertig. Die Lieferanten fragt jetzt Rita an, bis Freitag. Die
+Lizenzfrage vergessen wir. Entschieden wurde: wir starten im Januar.“ 2ndBrain schlägt je Punkt vor, was
+daraus wird (erledigt, verworfen, übergeben, neue Frist, Hinweis), dazu Einträge fürs Log des Themas und neue
+Punkte. Zu jedem Vorschlag steht die Stelle aus deinem Text; was keinen wörtlichen Beleg hat, kommt gar nicht
+erst an. Du nimmst heraus, was nicht stimmt, und klickst „Übernehmen“ – erst dann wird geschrieben, mit deinem
+Satz als Unterpunkt am Punkt. Danach steht die Liste neu da, und du machst weiter. Nachzulesen in
+`reports/geprueft`. Das braucht das Modell; ohne es geht jeder Punkt einzeln über das ✎.
+
+**Thema abschließen** (Befehl; auf einer Themen-Seite gilt er für dieses Thema; Desktop). Ein Satz zum Grund,
+dann je offenem Punkt: erledigt, verworfen oder ans Dach-Thema – vorbelegt, mit „Alle …“ in einem Klick.
+Unterthemen kannst du mit abschließen. Das Thema bleibt als Seite stehen, verschwindet aber aus Heute, Fokus,
+Rollen, Lagebild und Verzeichnis. Derselbe Befehl ohne offene Themen-Seite listet die abgeschlossenen Themen
+zum Wieder-Öffnen.
 
 ## Sind die offenen Punkte wirklich noch offen?
 

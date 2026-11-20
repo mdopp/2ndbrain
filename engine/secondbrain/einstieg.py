@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import aufgaben as tk
 import rollen
+import thema_schliessen
 import vault_paths as vp
 
 KARTE = "CLAUDE.md"
@@ -135,6 +136,8 @@ def themen_zeilen(heute: date | None = None) -> list[dict]:
     rows: dict[str, dict] = {}
     for slug, th in themen.items():
         fm = vp.read_frontmatter_head(th["pfad"])
+        if thema_schliessen.abgeschlossen(fm):           # abgeschlossen: nur noch in der Fusszeile
+            continue
         ts = offen.get(slug, [])
         fokus = fm.get("fokus")
         rows[slug] = {
@@ -202,6 +205,9 @@ def verzeichnis_text(heute: date | None = None) -> str:
             "eingetragen, es gilt der Standard `fuehre`._"]
     if ohne:
         out += ["", f"_{ohne} offene Punkte gehören zu keinem Thema – sie stehen nur in ihren Termin-Notizen._"]
+    zu = sorted(thema_schliessen.abgeschlossene())
+    if zu:
+        out += ["", "_Abgeschlossen (Seite bleibt, `status: done`): " + ", ".join(f"[[{s}]]" for s in zu) + "_"]
     return "\n".join(out).rstrip() + "\n"
 
 

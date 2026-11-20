@@ -73,7 +73,8 @@ export function hinweise(r: TriageErgebnis): string[] {
 }
 
 /** Die Argumente fuer `2ndbrain triage --anwenden …`. */
-export function anwendenArgs(p: TriagePunkt, als: Vorschlag): string[] {
+export function anwendenArgs(p: TriagePunkt, als: Vorschlag, hinweis = ""): string[] {
   const an = als === "uebergeben" || als === "nachfassen" ? (p.an || p.an_name) : "";
-  return ["triage", "--anwenden", p.path, "--line", String(p.line), "--text", p.text, "--als", als, ...(an ? ["--an", an] : [])];
+  return ["triage", "--anwenden", p.path, "--line", String(p.line), "--text", p.text, "--als", als, ...(an ? ["--an", an] : []),
+          ...(hinweis.trim() ? ["--hinweis", hinweis.trim()] : [])];
 }

@@ -54,18 +54,20 @@ export class TriageModal extends Modal {
     main.createDiv({ cls: "sb-muted", text: p.grund });
     const meta = metaZeile(p);
     if (meta.text) main.createDiv({ cls: `sb-task-meta${meta.dringend ? " sb-fehler" : ""}`, text: meta.text });
+    const hinweis = main.createEl("input", { type: "text", cls: "sb-triage-hinweis",
+                                             attr: { placeholder: "Hinweis dazu (freiwillig) – steht am Punkt" } });
     const knoepfe = row.createDiv({ cls: "sb-buttons" });
     const ja = knoepfe.createEl("button", { text: knopfText(p), cls: "mod-cta sb-btn-small" });
-    ja.onclick = () => void this.entscheiden(row, p, p.vorschlag);
+    ja.onclick = () => void this.entscheiden(row, p, p.vorschlag, hinweis.value);
     if (p.vorschlag !== "selbst") {
       const nein = knoepfe.createEl("button", { text: "Bleibt bei mir", cls: "sb-btn-small" });
-      nein.onclick = () => void this.entscheiden(row, p, "selbst");
+      nein.onclick = () => void this.entscheiden(row, p, "selbst", hinweis.value);
     }
   }
 
-  private async entscheiden(row: HTMLElement, p: TriagePunkt, als: Vorschlag): Promise<void> {
+  private async entscheiden(row: HTMLElement, p: TriagePunkt, als: Vorschlag, hinweis = ""): Promise<void> {
     row.querySelectorAll("button").forEach((b) => { (b as HTMLButtonElement).disabled = true; });
-    const r = await this.plugin.triageAnwenden(p, als);
+    const r = await this.plugin.triageAnwenden(p, als, hinweis);
     if (!r?.ok) {
       new Notice(`2ndBrain: nicht übernommen – ${r?.grund ?? "die Engine hat nicht geantwortet"}`, 8000);
     }

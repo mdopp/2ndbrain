@@ -303,6 +303,8 @@ def resolve_clarification(cid: str, resolution: str) -> bool:
 
     old_block = m.group(0)
     today = date.today().isoformat()
+    if _hinweis_aktuell:                   # der Hinweis zur Antwort bleibt an der erledigten Karte stehen
+        resolution = f"{resolution} – Hinweis: „{_hinweis_aktuell}“"
     new_block = f"### ✅ [{cid}] ~~{m.group(1)}~~\n*Geloest am {today}: {resolution}*\n"
 
     updated = content.replace(old_block, new_block)
@@ -324,6 +326,48 @@ _NAME_RE = re.compile(r"[A-ZÄÖÜ][\wäöüß'-]+(?:\s+(?:von|van|de|der|zu|[A-
 def checked_option(body: str) -> str | None:
     m = _CHECKED_RE.search(body)
     return m.group(1).strip() if m else None
+
+
+# Zur Antwort gehoert ein freier Hinweis (`> Hinweis: ...` in der Karte; die Rueckfragen-Ansicht des
+# Plugins schreibt ihn). Er bleibt an der erledigten Karte und, wo die Antwort Aufgaben zuordnet, als
+# Unterpunkt an ihnen. Ohne Haken ist er selbst die Antwort: ein Name gilt wie eine frei eingetragene
+# Option, sonst waehlt das Modell die Option, die er meint - findet es keine, bleibt die Karte offen.
+HINWEIS_MARKE = "> Hinweis:"
+OHNE_AKTION = "Ohne Aktion schließen"
+_HINWEIS_RE = re.compile(r"^> Hinweis:[ \t]*(.+)$", re.M)
+_OPTION_RE = re.compile(r"^- \[ \]\s*(.+)$", re.M)
+_hinweis_aktuell = ""
+_WAHL_SCHEMA = {"type": "object", "properties": {"option": {"type": "integer"}}, "required": ["option"]}
+_WAHL_SYSTEM = (
+    "Zu einer Rueckfrage gibt es nummerierte Optionen und eine frei geschriebene Antwort. Nenne die Nummer der "
+    "Option, die die Antwort eindeutig meint. Passt keine oder ist es nicht eindeutig, nenne 0. Antworte "
+    "ausschliesslich mit dem JSON-Objekt laut Schema.")
+
+
+def hinweis_von(body: str) -> str:
+    m = _HINWEIS_RE.search(body or "")
+    return " ".join(m.group(1).split()) if m else ""
+
+
+def wahl_aus_hinweis(card: dict, hinweis: str, people: set[str], aliases: dict[str, str], llm_call=None) -> str:
+    """Die Option, die ein Hinweis ohne Haken meint ("" = keine): ein Name direkt, sonst fragt der Code
+    das Modell nach der Nummer."""
+    name = re.sub(r"[`*_]", "", hinweis).strip().rstrip(".")
+    if _NAME_RE.fullmatch(name) or aliases.get(name.lower(), "") in people:
+        return name
+    optionen = [o.strip() for o in _OPTION_RE.findall(card["body"])]
+    if not optionen or llm_call is None:
+        return ""
+    frage = (f"Rückfrage: {card['title']}\n\n" + "\n".join(f"{i}. {o}" for i, o in enumerate(optionen, 1))
+             + f"\n\nAntwort: {hinweis}")
+    try:
+        payload, _ = llm_call([{"role": "system", "content": _WAHL_SYSTEM}, {"role": "user", "content": frage}],
+                              _WAHL_SCHEMA, max_tokens=200, task="rueckfrage-hinweis")
+    except Exception as e:                           # noqa: BLE001 - die Karte bleibt offen, der Hinweis steht
+        print(f"[WARN] Hinweis zu {card['id']}: {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
+    nr = payload.get("option") if isinstance(payload, dict) else None
+    return optionen[nr - 1] if isinstance(nr, int) and not isinstance(nr, bool) and 1 <= nr <= len(optionen) else ""
 
 
 def decide(choice: str, people: set[str], aliases: dict[str, str]) -> tuple[str, str]:
@@ -390,6 +434,8 @@ def _assign_owner(cid: str, data: dict, slug: str, *, dry_run: bool) -> str:
                     task.owner, task.owner_raw = slug, None
                     indent = lines[hit.line][: len(lines[hit.line]) - len(lines[hit.line].lstrip())]
                     lines[hit.line] = indent + tk.render(task, names)
+                    if _hinweis_aktuell:
+                        lines.insert(hit.line + 1, indent + tk.NOTE_PREFIX + f"Hinweis aus der Rückfrage: {_hinweis_aktuell}")
                     p.write_text("\n".join(lines), encoding="utf-8", newline="\n")
             fixed += 1
         else:
@@ -448,17 +494,45 @@ def _topic_card(cid: str, data: dict, choice: str, *, dry_run: bool) -> dict:
             **({"ergebnis": f"eingespielt in {ziel}"} if ok else {"grund": f"nicht eingespielt ({ziel})"})}
 
 
-def apply_checked(*, dry_run: bool = False) -> list[dict]:
-    """Angehakte Karten einarbeiten. Liefert je Karte, was passiert ist (oder warum nicht)."""
-    import anlegen
+def apply_checked(*, dry_run: bool = False, llm_call=None) -> list[dict]:
+    """Beantwortete Karten einarbeiten (Haken an einer Option, oder ein Hinweis allein). Liefert je
+    Karte, was passiert ist (oder warum nicht)."""
+    global _hinweis_aktuell
     out = []
+    for card in list_clarifications():
+        _hinweis_aktuell = hinweis_von(card["body"])
+        try:
+            r = _karte_einarbeiten(card, dry_run=dry_run, llm_call=llm_call)
+        finally:
+            hinweis, _hinweis_aktuell = _hinweis_aktuell, ""
+        if r is not None:
+            out.append({**r, "hinweis": hinweis} if hinweis else r)
+    return out
+
+
+def _karte_einarbeiten(card: dict, *, dry_run: bool, llm_call=None) -> dict | None:
+    """Eine Karte: None = unbeantwortet."""
+    import anlegen
+    out: list[dict] = []
     people = set(vp.entity_slugs("people"))
     aliases = vp.alias_map()
-    for card in list_clarifications():
+    for card in [card]:
         choice = checked_option(card["body"])
+        if not choice and _hinweis_aktuell:
+            choice = wahl_aus_hinweis(card, _hinweis_aktuell, people, aliases, llm_call)
+            if not choice:
+                return {"id": card["id"], "ok": False, "auswahl": "",
+                        "grund": "Hinweis ohne Haken: keine Option eindeutig gemeint"
+                                 + ("" if llm_call else " (ohne Modell nur bei einem Namen)") + " – bitte eine Option anhaken"}
         if not choice:
             continue
         cid, data = card["id"], load_pending(card["id"]) or {}
+        if choice.startswith(OHNE_AKTION):               # jede Karte laesst sich so schliessen (Plugin-Knopf)
+            if not dry_run:
+                (PENDING_DIR / f"{cid}.json").unlink(missing_ok=True)
+                resolve_clarification(cid, "ohne Aktion geschlossen (Entscheidung des Benutzers)")
+            out.append({"id": cid, "ok": True, "ergebnis": "ohne Aktion geschlossen", "auswahl": choice})
+            continue
         if data.get("kind") in THEMEN_KARTEN:
             out.append(_topic_card(cid, data, choice, dry_run=dry_run))
             continue
@@ -501,7 +575,7 @@ def apply_checked(*, dry_run: bool = False) -> list[dict]:
             (PENDING_DIR / f"{cid}.json").unlink(missing_ok=True)
             resolve_clarification(cid, f"Haken „{choice[:60]}“ – {done}")
         out.append({"id": cid, "ok": True, "ergebnis": done, "auswahl": choice})
-    return out
+    return out[0] if out else None
 
 
 def archive_resolved(*, dry_run: bool = False) -> int:
@@ -565,6 +639,18 @@ if __name__ == "__main__":
 
     elif cmd in ("abhaken", "aufraeumen"):
         dry = "--dry-run" in sys.argv
+        if cmd == "abhaken" and "--json" in sys.argv:    # fuer das Plugin: gleich nach einer Antwort
+            llm_call = None
+            if "--mit-modell" in sys.argv:               # Hinweis ohne Haken: das Modell waehlt die Option
+                import modell
+                if modell.available()[0]:
+                    llm_call = modell.complete_json
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()):          # die Meldungen der Schritte stoeren das JSON
+                karten = apply_checked(dry_run=dry, llm_call=llm_call)
+                n = archive_resolved(dry_run=dry)
+            print(json.dumps({"ok": True, "karten": karten, "archiviert": n}, ensure_ascii=False))
+            sys.exit(0)
         if cmd == "abhaken":
             for r in apply_checked(dry_run=dry):
                 print(f"  {'OK ' if r['ok'] else '-- '} {r['id']}: {r.get('ergebnis') or r.get('grund')}"

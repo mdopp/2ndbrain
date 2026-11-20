@@ -325,7 +325,11 @@ def step_rueckfragen(ctx: dict) -> dict:
     import rueckfragen as ce
     if ctx["dry_run"]:
         return {"ok": True, "detail": "Probelauf"}
-    done = ce.apply_checked()
+    llm_call = None                                  # nur fuer Hinweise ohne Haken: welche Option ist gemeint?
+    if ctx["llm_ok"]:
+        import modell
+        llm_call = modell.complete_json
+    done = ce.apply_checked(llm_call=llm_call)
     moved = ce.archive_resolved()
     ok = sum(1 for r in done if r["ok"])
     return {"ok": True, "changed": ok + moved,

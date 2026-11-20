@@ -1214,6 +1214,165 @@ def t_einstieg_karte_und_verzeichnis():
     ok("_Stand 07.10.2026" in (_VAULT / einstieg.VERZEICHNIS).read_text(encoding="utf-8"), "Datum des Schreibens")
 
 
+def _hand_vault():
+    """Zwei Personen, ein Dach mit Unterthema, Punkte auf der Seite und in einer Termin-Notiz."""
+    import vault_paths
+    d = _VAULT / "entities" / "projects"
+    p = _VAULT / "entities" / "people"
+    m = _VAULT / "active-meetings"
+    for x in (d, p, m):
+        x.mkdir(parents=True, exist_ok=True)
+    for slug, name in (("hand-ich", "Ich Hand"), ("rita-hand", "Rita Hand")):
+        (p / f"{slug}.md").write_text(f"---\ntype: person\nname: {name}\n---\n# {name}\n", encoding="utf-8", newline="\n")
+    (d / "hand-dach.md").write_text("---\ntype: project\ntitle: Hand Dach\nstatus: active\n---\n# Hand Dach\n\n## Offene Punkte\n\n## Event Log\n",
+                                    encoding="utf-8", newline="\n")
+    (d / "hand-kind.md").write_text(
+        "---\ntype: project\ntitle: Hand Kind\nstatus: active\nparent: \"[[hand-dach]]\"\nfokus: 1\n---\n# Hand Kind\n\n## Offene Punkte\n"
+        "- [ ] Lastenheft schreiben — [[hand-ich|Ich Hand]] · [[hand-kind|Hand Kind]] ➕ 2026-09-01\n"
+        "    - Beleg aus dem Termin\n"
+        "- [ ] Lieferanten anfragen — [[rita-hand|Rita Hand]] · [[hand-kind|Hand Kind]] 📅 2026-10-01 ➕ 2026-09-02\n"
+        "- [ ] ❓ Wer zahlt die Lizenz? — an [[rita-hand|Rita Hand]] · [[hand-kind|Hand Kind]] ➕ 2026-09-03\n\n"
+        "## Event Log\n- [2026-09-01] [STATUS] Auftakt (→ [[x]])\n", encoding="utf-8", newline="\n")
+    (m / "2026-09-05 - Handrunde.md").write_text(
+        "---\ntype: meeting\ntitle: Handrunde\ndate: 2026-09-05\nstatus: nachbereitet\n---\n# Handrunde\n\n## Actions\n"
+        "- [ ] Testdaten besorgen — [[rita-hand|Rita Hand]] · [[hand-kind|Hand Kind]] ➕ 2026-09-05\n"
+        "- [ ] Abnahme planen — [[hand-ich|Ich Hand]] · [[hand-kind|Hand Kind]] ➕ 2026-09-05\n", encoding="utf-8", newline="\n")
+    vault_paths.invalidate_entity_caches()
+    return d, m
+
+
+def t_aendern_mit_hinweis_und_log():
+    """Aendern von Hand: der Hinweis steht als Unterpunkt, die Zeile bleibt bei Status-Wechsel wie notiert,
+    Person und Frist schreiben sie neu, eine verschobene Zeile wird nicht angefasst, das Log bekommt eine Zeile."""
+    import aendern
+    from datetime import date as _date
+    d, m = _hand_vault()
+    heute = _date(2026, 11, 20)
+    rel = "entities/projects/hand-kind.md"
+    getan = aendern.punkte_aendern([
+        {"path": rel, "line": 10, "text": "Lastenheft schreiben", "aktion": "erledigt", "hinweis": "liegt  im Wiki"},
+        {"path": rel, "line": 12, "text": "Lieferanten anfragen", "aktion": "uebergeben", "an": "hand-ich"},
+        {"path": rel, "line": 13, "text": "ein ganz anderer Punkt", "aktion": "verworfen"},
+        {"path": "entities/people/rita-hand.md", "line": 0, "text": "x", "aktion": "erledigt"},
+    ], heute=heute, woher="Test")
+    eq([a["aktion"] for a in getan], ["uebergeben", "erledigt"], "nur was an der Zeile noch stimmt, in erlaubten Dateien:")
+    text = (d / "hand-kind.md").read_text(encoding="utf-8")
+    ok("- [x] Lastenheft schreiben — [[hand-ich|Ich Hand]] · [[hand-kind|Hand Kind]] ➕ 2026-09-01 ✅ 2026-11-20\n"
+       "    - Erledigt am 20.11.2026 (Test): liegt im Wiki\n    - Beleg aus dem Termin" in text, f"erledigt mit Hinweis:\n{text}")
+    ok("- [ ] Lieferanten anfragen — [[hand-ich|Ich Hand]] · [[hand-kind|Hand Kind]] 📅 2026-10-01 ➕ 2026-09-02\n"
+       "    - Übergeben an Ich Hand, vorher Rita Hand am 20.11.2026 (Test)" in text, f"uebergeben:\n{text}")
+    ok("- [ ] ❓ Wer zahlt die Lizenz?" in text, "die Frage blieb unberuehrt")
+    ok(aendern.log_eintrag("hand-kind", "DECISION", "Wir nehmen  den zweiten Anbieter", heute=heute, quelle="Test"), "Log-Zeile")
+    ok(not aendern.log_eintrag("hand-kind", "DECISION", "Wir nehmen den zweiten Anbieter", heute=heute, quelle="Test"), "keine Dublette")
+    ok(not aendern.log_eintrag("hand-kind", "ACTION", "x", heute=heute) and not aendern.log_eintrag("gibts-nicht", "STATUS", "x"), "Art und Thema geprueft")
+    text = (d / "hand-kind.md").read_text(encoding="utf-8")
+    ok("## Event Log\n- [2026-11-20] [DECISION] Wir nehmen den zweiten Anbieter (Test)\n- [2026-09-01] [STATUS] Auftakt" in text, f"oben im Log:\n{text}")
+    ok(aendern.punkt_neu("hand-dach", "Vertrag pruefen", person="rita-hand", frist="2026-12-01", heute=heute), "neuer Punkt")
+    ok("- [ ] Vertrag pruefen — [[rita-hand|Rita Hand]] · [[hand-dach|Hand Dach]] 📅 2026-12-01 ➕ 2026-11-20"
+       in (d / "hand-dach.md").read_text(encoding="utf-8"), "kanonisch auf der Themen-Seite")
+
+
+def t_thema_schliessen_mit_punkten():
+    """Thema abschliessen: je Punkt die Wahl (sonst der Standard), umhaengen zieht mit Unterpunkten ans Dach,
+    auch Punkte in Termin-Notizen; Status, Grund und Log stehen am Thema; es faellt aus Verzeichnis und Rollen."""
+    import aufgaben
+    import einstieg
+    import rollen
+    import thema_schliessen
+    import vault_paths
+    from datetime import date as _date
+    d, m = _hand_vault()
+    heute = _date(2026, 11, 20)
+    with _AttrGuard(vault_paths, ich=lambda: "hand-ich"):
+        v = thema_schliessen.vorschau("hand-kind")
+        eq((len(v["punkte"]), v["dach"], [p["vorschlag"] for p in v["punkte"] if p["frage"]]), (5, "hand-dach", ["verworfen"]),
+           "Vorschau: alle offenen Punkte des Themas, das Dach, Fragen fallen weg:")
+        ok(not thema_schliessen.schliessen("hand-kind", " ")["ok"], "ohne Grund kein Abschluss")
+        ident = {p["text"]: p["id"] for p in v["punkte"]}
+        r = thema_schliessen.schliessen("hand-kind", "Projekt ist live", {ident["Lastenheft schreiben"]: "dach",
+                                                                          ident["Testdaten besorgen"]: "dach",
+                                                                          ident["Abnahme planen"]: "erledigt"}, heute=heute)
+        eq((r["ok"], r["punkte"], r["nicht_geaendert"]), (True, {"erledigt": 1, "verworfen": 2, "umhaengen": 2}, 0), "Ergebnis:")
+        kind = (d / "hand-kind.md").read_text(encoding="utf-8")
+        dach = (d / "hand-dach.md").read_text(encoding="utf-8")
+        ok("Lastenheft schreiben" not in kind and "- [ ] Lastenheft schreiben — [[hand-ich|Ich Hand]] · [[hand-dach|Hand Dach]] ➕ 2026-09-01\n"
+           "    - Beleg aus dem Termin\n    - Umgehängt von Hand Kind nach Hand Dach am 20.11.2026 (Thema „Hand Kind“ abgeschlossen): Projekt ist live"
+           in dach, f"mit Unterpunkten ans Dach gezogen:\n{dach}")
+        ok("- [-] Lieferanten anfragen" in kind and "- [-] ❓ Wer zahlt die Lizenz?" in kind, f"der Rest verworfen:\n{kind}")
+        ok("status: done" in kind and "abgeschlossen: '2026-11-20'" in kind and "abschluss_grund: Projekt ist live" in kind
+           and "fokus:" not in kind, f"Frontmatter:\n{kind[:300]}")
+        ok("- [2026-11-20] [MILESTONE] Thema abgeschlossen: Projekt ist live" in kind, "Log-Eintrag")
+        notiz = (m / "2026-09-05 - Handrunde.md").read_text(encoding="utf-8")
+        ok("- [ ] Testdaten besorgen — [[rita-hand|Rita Hand]] · [[hand-dach|Hand Dach]] ➕ 2026-09-05" in notiz
+           and "- [x] Abnahme planen" in notiz and "✅ 2026-11-20" in notiz, f"Termin-Notiz:\n{notiz}")
+        eq(len([t for t in aufgaben.scan() if t.is_open and "hand-kind" in t.topics]), 0, "kein offener Punkt mehr am Thema:")
+        ok(not thema_schliessen.schliessen("hand-kind", "noch einmal")["ok"], "zweimal geht nicht")
+        ok("hand-kind" not in {z["slug"] for z in einstieg.themen_zeilen(heute)} and "hand-kind" not in {x["slug"] for x in rollen.vorschlaege()}
+           and "_Abgeschlossen (Seite bleibt, `status: done`): " in einstieg.verzeichnis_text(heute), "aus Verzeichnis und Rollen heraus")
+        bericht = (_VAULT / "reports" / "geprueft.md").read_text(encoding="utf-8")
+        ok("## 20.11.2026 – Thema abgeschlossen: Hand Kind" in bericht and "- Grund: Projekt ist live" in bericht, f"Bericht:\n{bericht[:600]}")
+        ok(thema_schliessen.oeffnen("hand-kind", heute=heute)["ok"], "wieder oeffnen")
+        kind = (d / "hand-kind.md").read_text(encoding="utf-8")
+        ok("status: active" in kind and "abschluss_grund" not in kind and "[STATUS] Thema wieder geöffnet" in kind, "wieder aktiv")
+        # mit Unterthemen: nur wenn genannt
+        ok(thema_schliessen.schliessen("hand-dach", "Programm beendet", unterthemen=["hand-kind"], heute=heute)["unterthemen"] == ["hand-kind"],
+           "das genannte Unterthema geht mit")
+        ok("status: done" in (d / "hand-kind.md").read_text(encoding="utf-8"), "Unterthema abgeschlossen")
+
+
+def t_durchsprechen_nur_mit_beleg():
+    """Durchsprechen: das Modell ordnet zu, der Code prueft - Nummer aus der Liste, Beleg woertlich im eigenen
+    Text, Person bekannt, Frist aus dem Beleg gerechnet; geschrieben wird erst beim Anwenden."""
+    import durchsprechen
+    import vault_paths
+    from datetime import date as _date
+    d, m = _hand_vault()
+    heute = _date(2026, 11, 20)                    # ein Freitag
+    text = ("Das Lastenheft ist fertig und abgenommen. Die Lieferanten fragt jetzt Ich Hand an, bis zum 3.12. "
+            "Die Lizenzfrage vergessen wir. Entschieden wurde: wir starten im Januar.")
+    antwort = {"aenderungen": [
+        {"punkt": 1, "aktion": "erledigt", "beleg": "Das Lastenheft ist fertig und abgenommen"},
+        {"punkt": 2, "aktion": "uebergeben", "an": "Ich Hand", "beleg": "Die Lieferanten fragt jetzt Ich Hand an, bis zum 3.12."},
+        {"punkt": 2, "aktion": "frist", "beleg": "Die Lieferanten fragt jetzt Ich Hand an, bis zum 3.12."},
+        {"punkt": 3, "aktion": "verworfen", "beleg": "Die Lizenzfrage vergessen wir"},
+        {"punkt": 4, "aktion": "erledigt", "beleg": "Die Testdaten sind da"},              # steht nicht im Text
+        {"punkt": 99, "aktion": "erledigt", "beleg": "Das Lastenheft ist fertig"},         # Nummer gibt es nicht
+        {"punkt": 5, "aktion": "uebergeben", "an": "Otto Niemand", "beleg": "Die Lizenzfrage vergessen wir"},   # Name nicht im Text
+    ], "log": [{"thema": "hand-kind", "art": "DECISION", "text": "Start im Januar.", "beleg": "wir starten im Januar"},
+               {"thema": "gibts-nicht", "art": "ACTION", "text": "x", "beleg": "wir starten im Januar"}],
+        "neu": [{"text": "Lastenheft schreiben", "beleg": "Das Lastenheft ist fertig"}]}                       # steht schon in der Liste
+    gesehen = []
+
+    def modell(messages, schema, **kw):
+        gesehen.append(messages[1]["content"])
+        return antwort, []
+
+    with _AttrGuard(vault_paths, ich=lambda: "hand-ich"):
+        p = durchsprechen.punkte({"thema": "hand-kind"})
+        eq([x["text"] for x in p["punkte"]], ["Lastenheft schreiben", "Lieferanten anfragen", "Wer zahlt die Lizenz?",
+                                              "Abnahme planen", "Testdaten besorgen"][:3] + sorted(["Abnahme planen", "Testdaten besorgen"],
+                                                                                                    key=lambda s: s != "Testdaten besorgen"),
+           "die Punkte des Themas, aelteste zuerst:")
+        eq(len(durchsprechen.punkte({"meine": True})["punkte"]), 2, "meine:")
+        v = durchsprechen.vorschlag({"thema": "hand-kind"}, text, modell, heute=heute)
+        ok("Heute ist Freitag, der 20.11.2026" in gesehen[0] and "1. Lastenheft schreiben — Ich Hand" in gesehen[0], "das Modell bekommt Datum und Liste")
+        eq([(a["nr"], a["aktion"], a.get("an", ""), a.get("datum", "")) for a in v["aenderungen"]],
+           [(1, "erledigt", "", ""), (2, "uebergeben", "hand-ich", ""), (2, "frist", "", "2026-12-03"), (3, "verworfen", "", "")],
+           "nur was Nummer, Beleg und Person besteht; die Frist rechnet der Code:")
+        eq(([e["text"] for e in v["log"]], v["neu"], v["verworfen"]), (["Start im Januar."], [], 5), "Log nur fuer bekannte Themen, keine Dublette:")
+        vorher = (d / "hand-kind.md").read_text(encoding="utf-8")
+        r = durchsprechen.anwenden({"titel": v["titel"], "aenderungen": v["aenderungen"], "log": v["log"], "neu": []}, heute=heute)
+        eq((r["geaendert"], r["nicht_geaendert"], r["log"]), (4, 0, 1), "angewendet:")
+    kind = (d / "hand-kind.md").read_text(encoding="utf-8")
+    ok(vorher != kind and "- [x] Lastenheft schreiben" in kind
+       and "    - Erledigt am 20.11.2026 (durchgesprochen): Das Lastenheft ist fertig und abgenommen" in kind, f"erledigt mit dem eigenen Satz:\n{kind}")
+    ok("- [ ] Lieferanten anfragen — [[hand-ich|Ich Hand]] · [[hand-kind|Hand Kind]] 📅 2026-12-03 ➕ 2026-09-02" in kind
+       and "Frist geändert auf 03.12.2026, vorher 2026-10-01 am 20.11.2026 (durchgesprochen)" in kind
+       and "Übergeben an Ich Hand, vorher Rita Hand" in kind, f"uebergeben und neue Frist am selben Punkt:\n{kind}")
+    ok("- [-] ❓ Wer zahlt die Lizenz?" in kind and "- [2026-11-20] [DECISION] Start im Januar. (durchgesprochen)" in kind, "verworfen, Log-Eintrag")
+    ok("## 20.11.2026 – Durchgesprochen: Hand Kind" in (_VAULT / "reports" / "geprueft.md").read_text(encoding="utf-8"), "im Bericht")
+
+
 def t_pruefung_schliesst_nur_mit_beleg():
     """Das Modell nennt, was laut Log erledigt oder ueberholt ist - geschlossen wird nur, wenn der Eintrag
     nicht aelter ist als der Punkt und der Beleg woertlich darin steht."""
@@ -1316,6 +1475,9 @@ TESTS = [
     ("pruefung: verstummt in den naechsten Terminen der Reihe -> geparkt", t_pruefung_parkt_verstummtes),
     ("pruefung: erledigt/ueberholt nur mit woertlichem Beleg aus einem juengeren Eintrag", t_pruefung_schliesst_nur_mit_beleg),
     ("einstieg: Karte (CLAUDE.md) und Themen-Verzeichnis, schreibt nur bei Aenderung", t_einstieg_karte_und_verzeichnis),
+    ("aendern: Hinweis als Unterpunkt, Person, Log-Zeile, neuer Punkt", t_aendern_mit_hinweis_und_log),
+    ("thema-schliessen: Punkte je Wahl, umhaengen ans Dach, Status, wieder oeffnen", t_thema_schliessen_mit_punkten),
+    ("durchsprechen: nur mit Nummer und woertlichem Beleg, Frist vom Code, zwei Aenderungen am Punkt", t_durchsprechen_nur_mit_beleg),
     ("vorbereiten: Jourfix nach Richtung - laengst offen, ich schulde, zum Uebergeben", t_jourfix_nach_richtung),
     ("stand: Delta-Zeilen, Risiken in Gruppen, Beteiligte eingeklappt", t_stand_delta_und_risiko_gruppen),
     ("briefing: keine Schablonenfrage, Begruendung ohne Wiederholung, hoechstens sechs", t_briefing_ohne_schablone),

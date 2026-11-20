@@ -161,6 +161,20 @@ details[open] > .sb-summary::before { transform: rotate(90deg); }
 .sb-topic-hit:hover { background: var(--background-modifier-hover); }
 .sb-check { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 
+/* Punkt mit Hinweis, Rückfragen, Thema abschließen, Durchsprechen */
+.sb-stift { flex: none; padding: 0 4px; height: auto; font-size: var(--font-ui-small); color: var(--text-faint); background: none; box-shadow: none; }
+.sb-stift:hover { color: var(--text-normal); }
+.sb-capture textarea.sb-kurz { min-height: 0; }
+.sb-capture .sb-buttons.sb-links { justify-content: flex-start; margin-top: 6px; }
+.sb-karte { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 8px 12px; margin-top: 12px; }
+.sb-karte .sb-check { margin-top: 6px; align-items: flex-start; }
+.sb-karte .sb-check input { margin-top: 3px; flex: none; }
+.sb-karte-text { font-size: var(--font-ui-small); max-height: 14em; overflow: auto; }
+.sb-dliste { max-height: 38vh; overflow: auto; margin-top: 6px; }
+.sb-dliste .sb-row, .sb-vorschlag { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; }
+.sb-vorschlag input { margin-top: 4px; flex: none; }
+.sb-triage-hinweis { width: 100%; margin-top: 4px; font-size: var(--font-ui-smaller); }
+
 /* ------------------------------------------------------------------ Chat */
 .sb-chat { display: flex; flex-direction: column; height: 100%; padding: 6px 8px; gap: 4px; }
 .sb-chat-list { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }

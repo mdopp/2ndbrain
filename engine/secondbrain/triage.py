@@ -393,7 +393,8 @@ def woche(v: dict | None = None, hoechstens: int = WOCHE_HOECHSTENS) -> list[dic
 
 # --------------------------------------------------------------- Anwenden
 
-def anwenden(pfad: str, line: int, text: str, als: str, an: str = "", heute: date | None = None) -> dict:
+def anwenden(pfad: str, line: int, text: str, als: str, an: str = "", heute: date | None = None,
+             hinweis: str = "") -> dict:
     """Eine Entscheidung an der Quelle festhalten (siehe Modul-Docstring). Prueft wie
     `aufgaben.complete`, dass die Zeile noch der erwartete Punkt ist."""
     heute = heute or date.today()
@@ -449,6 +450,9 @@ def anwenden(pfad: str, line: int, text: str, als: str, an: str = "", heute: dat
     elif als == PARKEN:
         lines[line] = tk._CHECKBOX_STATUS_RE.sub(r"\g<1>-\g<2>", lines[line], count=1)
         vermerk = f"Geparkt am {tag} (Triage) – wieder öffnen: `[-]` zu `[ ]`"
+    hinweis = " ".join(str(hinweis or "").split())
+    if hinweis:                           # der eigene Satz zur Entscheidung steht mit an der Quelle
+        vermerk = f"{vermerk}: {hinweis}" if vermerk else f"Hinweis am {tag} (Triage): {hinweis}"
     if vermerk:
         lines.insert(line + 1, einzug + tk.NOTE_PREFIX + vermerk)
         path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
@@ -479,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--text")
     ap.add_argument("--als", choices=VORSCHLAEGE)
     ap.add_argument("--an", default="")
+    ap.add_argument("--hinweis", default="", help="eigener Satz zur Entscheidung - steht als Unterpunkt am Punkt")
     args = ap.parse_args(argv)
 
     if args.anwenden:
@@ -490,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
                 out = {"ok": False, "grund": "Die Automatik läuft gerade – gleich noch einmal."}
             else:
                 try:
-                    out = anwenden(args.anwenden, args.line, args.text, args.als, args.an)
+                    out = anwenden(args.anwenden, args.line, args.text, args.als, args.an, hinweis=args.hinweis)
                 finally:
                     auto.release_lock()
         print(json.dumps(out, ensure_ascii=False))

@@ -29,6 +29,11 @@ function str(v: unknown): string {
 }
 
 /** JJJJ-MM-TT aus einem Feld (auch Datum mit Zeit); "" wenn keins. */
+/** Ist das Thema abgeschlossen? (wie thema_schliessen.abgeschlossen) */
+export function themaZu(status: unknown): boolean {
+  return ["done", "closed", "abgeschlossen"].includes(String(status ?? "").trim().toLowerCase());
+}
+
 function isoTag(v: unknown): string {
   const s = str(v).trim().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
@@ -124,7 +129,9 @@ export class VaultIndex {
   /** Themen mit den Radar-Eigenschaften aus stand.py (fuer "Heute") und dem Fokus (core/fokus.ts). */
   topics(): TopicInfo[] {
     const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-    return this.files(TOPICS).map((path) => {
+    // Abgeschlossene Themen (`status: done`, thema_schliessen.py) bleiben als Seite, fallen aber aus Radar,
+    // Fokus, Rollen und Auswahl - `abgeschlossene()` nennt sie zum Wieder-Oeffnen.
+    return this.files(TOPICS).filter((path) => !themaZu(this.src.frontmatter(path).status)).map((path) => {
       const fm = this.src.frontmatter(path);
       return {
         slug: stem(path), path, title: str(fm.title) || str(fm.name) || stem(path),
@@ -138,6 +145,14 @@ export class VaultIndex {
         rolle: str(fm.meine_rolle).trim().toLowerCase(),
         verantwortlich: stripLink(str(fm.verantwortlich)).split("|")[0].trim(),
       };
+    });
+  }
+
+  /** Abgeschlossene Themen: Slug, Titel, wann und warum. */
+  abgeschlossene(): { slug: string; path: string; title: string; am: string; grund: string }[] {
+    return this.files(TOPICS).filter((path) => themaZu(this.src.frontmatter(path).status)).map((path) => {
+      const fm = this.src.frontmatter(path);
+      return { slug: stem(path), path, title: str(fm.title) || stem(path), am: isoTag(fm.abgeschlossen), grund: str(fm.abschluss_grund) };
     });
   }
 

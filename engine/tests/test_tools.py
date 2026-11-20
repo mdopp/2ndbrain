@@ -4560,6 +4560,59 @@ def t_clarify_checked_cards_are_applied_and_archived():
         restore_vault()
 
 
+def t_clarify_hint_travels_and_answers():
+    """Rueckfragen mit Hinweis: er steht an der erledigten Karte und als Unterpunkt an der zugeordneten
+    Aufgabe; ohne Haken ist er die Antwort - ein Name direkt, sonst waehlt das Modell die Option, und
+    ohne Modell bleibt die Karte offen. "Ohne Aktion schliessen" schliesst jede Karte."""
+    d = temp_vault()
+    try:
+        import rueckfragen as ce
+        importlib.reload(ce)
+        people = d / "entities" / "people"
+        for slug, name in (("anna-berg", "Anna Berg"), ("anna-bauer", "Anna Bauer")):
+            (people / f"{slug}.md").write_text(f"---\ntype: person\nname: {name}\n---\n", encoding="utf-8", newline="\n")
+        topic = d / "entities" / "projects" / "demo.md"
+        topic.write_text("---\ntype: project\ntitle: Demo\n---\n# Demo\n\n## Offene Punkte\n"
+                         "- [ ] Angebot pruefen — Anna (?) ➕ 2026-09-20\n- [ ] Muster bestellen — Anna (?) ➕ 2026-09-21\n\n## Event Log\n",
+                         encoding="utf-8", newline="\n")
+        pend = d / ".2ndbrain" / "daten" / ".pending"
+        pend.mkdir(parents=True)
+        for cid, task in (("CLARIFY-1", "Angebot prüfen"), ("CLARIFY-2", "Muster bestellen"), ("CLARIFY-3", "x"), ("CLARIFY-4", "y")):
+            (pend / f"{cid}.json").write_text(json.dumps({"kind": "unknown_person", "payload": {"action_items": [
+                {"owner": "__RESOLVE__", "project": "demo", "task": task, "deadline": "TBD"}]}}), encoding="utf-8", newline="\n")
+        optionen = "- [ ] A) Anna Bauer (anna-bauer)\n- [ ] B) Anna Berg (anna-berg)\n"
+        (d / "04_Clarifications.md").write_text(
+            "# Rückfragen\n\n---\n\n"
+            "### ❓ [CLARIFY-1] Mehrdeutige Person 'Anna'\n\n- [ ] A) Anna Bauer (anna-bauer)\n- [x] B) Anna Berg (anna-berg)\n"
+            "> Hinweis: die  aus dem Einkauf, macht das bis Monatsende\n\n---\n"
+            f"### ❓ [CLARIFY-2] Mehrdeutige Person 'Anna'\n\n{optionen}> Hinweis: das ist die Kollegin Bauer vom Vertrieb\n\n---\n"
+            f"### ❓ [CLARIFY-3] Mehrdeutige Person 'Anna'\n\n{optionen}> Hinweis: keine Ahnung, frag mich spaeter\n\n---\n"
+            f"### ❓ [CLARIFY-4] Mehrdeutige Person 'Anna'\n\n{optionen}- [x] Ohne Aktion schließen\n> Hinweis: hat sich erledigt\n\n---\n",
+            encoding="utf-8", newline="\n")
+        ohne = {x["id"]: x for x in ce.apply_checked(dry_run=True)}
+        ok(ohne["CLARIFY-1"]["ok"] and not ohne["CLARIFY-2"]["ok"] and "ohne Modell" in ohne["CLARIFY-2"]["grund"], f"ohne Modell: {ohne}")
+        gefragt = []
+
+        def modell(messages, schema, **kw):
+            gefragt.append(messages[1]["content"])
+            return ({"option": 1} if "Bauer vom Vertrieb" in messages[1]["content"] else {"option": 0}), []
+
+        r = {x["id"]: x for x in ce.apply_checked(llm_call=modell)}
+        eq([r[k]["ok"] for k in ("CLARIFY-1", "CLARIFY-2", "CLARIFY-3", "CLARIFY-4")], [True, True, False, True], "Ergebnis je Karte:")
+        ok(len(gefragt) == 2 and "1. A) Anna Bauer (anna-bauer)" in gefragt[0], f"gefragt nur, wo der Haken fehlt: {gefragt}")
+        text = topic.read_text(encoding="utf-8")
+        ok("- [ ] Angebot pruefen — [[anna-berg|Anna Berg]] ➕ 2026-09-20\n"
+           "    - Hinweis aus der Rückfrage: die aus dem Einkauf, macht das bis Monatsende" in text, f"Hinweis an der Aufgabe:\n{text}")
+        ok("- [ ] Muster bestellen — [[anna-bauer|Anna Bauer]]" in text, f"das Modell hat die Option gewaehlt:\n{text}")
+        karten = (d / "04_Clarifications.md").read_text(encoding="utf-8")
+        ok("### ❓ [CLARIFY-3]" in karten and "frag mich spaeter" in karten, "die unklare Karte bleibt offen, der Hinweis steht")
+        ok("Hinweis: „die aus dem Einkauf, macht das bis Monatsende“" in karten and "ohne Aktion geschlossen" in karten
+           and "Hinweis: „hat sich erledigt“" in karten, f"Hinweis an der erledigten Karte:\n{karten}")
+        ok(not (pend / "CLARIFY-4.json").exists() and (pend / "CLARIFY-3.json").exists(), "Payload nur der erledigten entfernt")
+    finally:
+        restore_vault()
+
+
 def t_topic_cards_discard_and_assign():
     """Rueckfragen zu unbekannten Themen: "Verwerfen" legt die aufbewahrten Ereignisse ab,
     "zuordnen" mit [[thema]] in der Zeile spielt sie dort ein; ohne Ziel bleibt die Karte offen."""
@@ -6675,6 +6728,8 @@ TESTS = [
     ("Landkarte: Oberthema zeigt die schlechteste Ampel seiner Unterthemen", t_stand_parent_takes_worst_child_health),
     ("Rueckfragen: Haken genuegt, Person in vorhandene Aufgabe, Archiv",
      t_clarify_checked_cards_are_applied_and_archived),
+    ("Rueckfragen: Hinweis reist mit, antwortet ohne Haken (Name oder Modell), ohne Aktion schliessen",
+     t_clarify_hint_travels_and_answers),
     ("Wer kuemmert sich: Rolle nennt das Thema, Oberthema mit Unterthemen-Beteiligten, keine Fetzen",
      t_who_roles_and_subtree_participants),
     ("Systemuebersicht (LikeC4) + Fragen an den Atlas: Bereich, Abloesung, Belege, Verbindungstabelle, Kunden nie "

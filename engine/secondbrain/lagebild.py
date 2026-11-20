@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import aufgaben as tk
 import organisation
+import thema_schliessen
 import vault_paths as vp
 
 BERICHT = "reports/lagebild.md"
@@ -89,6 +90,8 @@ def themen_lage(heute: date) -> list[dict]:
     out = []
     for f in sorted(vp.PROJECTS_DIR.glob("*.md")) if vp.PROJECTS_DIR.is_dir() else []:
         fm = vp.read_frontmatter_head(f)
+        if thema_schliessen.abgeschlossen(fm):           # abgeschlossen: steht in keinem Bild mehr
+            continue
         out.append({"slug": f.stem, "titel": str(fm.get("title") or f.stem), "ampel": str(fm.get("health") or ""),
                     "offen": offen.get(f.stem, 0), "bewegt": str(fm.get("zuletzt_bewegt") or "")[:10],
                     "still": _tage(fm.get("zuletzt_bewegt"), heute),
